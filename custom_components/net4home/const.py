@@ -6,5 +6,5 @@ SERVICE_TYPE = "_net4home_iremote._tcp.local."
 DEFAULT_MI = 65281
 DEFAULT_OBJADR = 32700
 
-CONF_MI = "mi"
-CONF_OBJADR = "objadr"
+CONF_MI = "MI"
+CONF_OBJADR = "OBJADR"
