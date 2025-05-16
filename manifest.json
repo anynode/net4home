@@ -1,0 +1,13 @@
+{
+  "domain": "net4home",
+  "name": "net4home",
+  "version": "0.1.0",
+  "documentation": "https://github.com/yourusername/ha-net4home",
+  "requirements": [],
+  "dependencies": [],
+  "config_flow": true,
+  "zeroconf": [
+    "_net4home_iremote._tcp.local."
+  ],
+  "iot_class": "local_push"
+}
