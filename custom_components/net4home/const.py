@@ -2,7 +2,7 @@
 
 DOMAIN = "net4home"
 DEFAULT_PORT = 3478
-SERVICE_TYPE = "_n4hbuscon._tcp"
+SERVICE_TYPE = "_n4hbuscon._tcp.local"
 DEFAULT_MI = 65281
 DEFAULT_OBJADR = 32700
 
