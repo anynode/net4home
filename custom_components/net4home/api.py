@@ -88,7 +88,7 @@ class Net4HomeClient:
         if resp_result != N4H_IP_CLIENT_ACCEPTED:
             raise ConnectionError("Password handshake failed with code %s" % resp_result)
         _LOGGER.info("Password handshake successful")
-        # 1. Register with bus connector
+        # Register with bus connector
         await self.async_register()  # send MI/OBJADR registration
 
     async def async_register(self) -> None:
