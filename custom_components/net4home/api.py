@@ -1,21 +1,27 @@
-"""Async TCP client for net4home bus connector with MD5 handshake."""
+"""Async TCP client for net4home bus connector with MD5 handshake and packet framing."""
 import asyncio
 import hashlib
 import struct
+import logging
+from typing import Any, Tuple
 
 from .const import (
     DEFAULT_PORT,
     DEFAULT_MI,
     DEFAULT_OBJADR,
     N4HIP_PT_PASSWORT_REQ,
+    N4HIP_PT_PAKET,
+    N4HIP_PT_OOB_DATA_RAW,
     N4H_IP_CLIENT_ACCEPTED,
     DLL_REQ_VER,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 class Net4HomeClient:
     def __init__(
         self,
-        hass,
+        hass: Any,
         host: str,
         port: int = DEFAULT_PORT,
         password: str = "",
@@ -30,70 +36,96 @@ class Net4HomeClient:
         self._objadr = objadr
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
+        _LOGGER.debug(
+            "Initialized Net4HomeClient: host=%s port=%s MI=%s OBJADR=%s",
+            host, port, mi, objadr,
+        )
 
     async def async_connect(self) -> None:
-        """Establish connection and perform MD5-based password handshake."""
-        # 1. Open TCP connection
+        """Connect to the bus and perform MD5-based password handshake."""
+        _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
         self._reader, self._writer = await asyncio.open_connection(
             self._host, self._port
         )
+        _LOGGER.debug("TCP connection established")
 
-        # 2. Compute MD5 of the password
-        md5_digest: bytes = hashlib.md5(self._password.encode()).digest()
+        # MD5-based security handshake
+        md5_digest = hashlib.md5(self._password.encode()).digest()
+        _LOGGER.debug("Computed MD5 digest: %s", md5_digest.hex())
 
-        # 3. Build the TN4H_security payload
-        algotyp = 1                    # MD5 algorithm
-        result = 0                     # reserved
-        length = len(md5_digest)      # should be 16
-        # Password field is 56 bytes: our digest + zero-padding
+        # Build security payload: algo, result, length, digest + padding, applicationtyp, dllver
+        algotyp = 1
+        result = 0
+        length = len(md5_digest)
         pw_field = md5_digest.ljust(56, bytes([0]))
-        application_typ = 0            # per spec
-        dll_ver = DLL_REQ_VER         # client DLL version constant
+        application_typ = 0
+        dll_ver = DLL_REQ_VER
 
         payload = (
             struct.pack("<iii", algotyp, result, length)
             + pw_field
             + struct.pack("<ii", application_typ, dll_ver)
         )
-
-        # 4. Prepend header (packet type + payload length)
         header = struct.pack("<ii", N4HIP_PT_PASSWORT_REQ, len(payload))
+        _LOGGER.debug(
+            "Sending handshake: ptype=%s length=%s",
+            N4HIP_PT_PASSWORT_REQ,
+            len(payload),
+        )
         self._writer.write(header + payload)
         await self._writer.drain()
 
-        # 5. Read response header (type + length)
-        data = await self._reader.readexactly(8)
-        ptype, plen = struct.unpack("<ii", data)
+        # Await response
+        resp_header = await self._reader.readexactly(8)
+        ptype, plen = struct.unpack("<ii", resp_header)
+        _LOGGER.debug("Received handshake response header: ptype=%s plen=%s", ptype, plen)
         if ptype != N4HIP_PT_PASSWORT_REQ:
-            raise ConnectionError(f"Unexpected response type: {ptype}")
+            raise ConnectionError(f"Unexpected handshake response type: {ptype}")
 
-        # 6. Read response payload and check Result field
-        resp = await self._reader.readexactly(plen)
-        # The Result int is at offset 4 (after Algotyp), 4 bytes long
-        resp_result = struct.unpack("<i", resp[4:8])[0]
+        resp_payload = await self._reader.readexactly(plen)
+        resp_result = struct.unpack("<i", resp_payload[4:8])[0]
         if resp_result != N4H_IP_CLIENT_ACCEPTED:
-            raise ConnectionError("Password handshake failed")
+            raise ConnectionError("Password handshake failed with code %s" % resp_result)
+        _LOGGER.info("Password handshake successful")
 
     async def async_disconnect(self) -> None:
-        """Close the connection."""
+        """Close the connection to the bus."""
+        _LOGGER.info("Disconnecting from net4home bus")
         if self._writer:
             self._writer.close()
             await self._writer.wait_closed()
+            _LOGGER.debug("Connection closed")
 
-    async def async_send_packet(self, data: bytes) -> None:
-        """Send raw packet to the bus."""
+    def _build_header(self, ptype: int, length: int) -> bytes:
+        """Pack packet header with type and length."""
+        return struct.pack("<ii", ptype, length)
+
+    async def send_packet(self, ptype: int, payload: bytes) -> None:
+        """Send a framed packet to the bus."""
         if not self._writer:
-            raise ConnectionError("Not connected")
-        self._writer.write(data)
+            raise ConnectionError("Not connected to bus")
+        header = self._build_header(ptype, len(payload))
+        _LOGGER.debug("Sending packet type=%s length=%s", ptype, len(payload))
+        self._writer.write(header + payload)
         await self._writer.drain()
 
-    async def async_listen(self) -> None:
-        """Continuously listen for incoming messages."""
+    async def receive_packet(self) -> Tuple[int, bytes]:
+        """Receive and parse a framed packet from the bus."""
         if not self._reader:
-            raise ConnectionError("Not connected")
+            raise ConnectionError("Not connected to bus")
+        header = await self._reader.readexactly(8)
+        ptype, length = struct.unpack("<ii", header)
+        payload = await self._reader.readexactly(length)
+        _LOGGER.debug("Received packet type=%s length=%s", ptype, length)
+        return ptype, payload
+
+    async def async_listen(self) -> None:
+        """Continuously listen for incoming messages and dispatch."""
+        _LOGGER.info("Starting listener for bus messages")
         while True:
-            header = await self._reader.readexactly(6)
-            # TODO: parse header (e.g. packet type + length) and then payload
-            # length = parse_length_from_header(header)
-            # payload = await self._reader.readexactly(length)
-            # ...dispatch to handlers...
+            ptype, payload = await self.receive_packet()
+            if ptype == N4HIP_PT_OOB_DATA_RAW:
+                _LOGGER.debug("Received raw OOB data: %s", payload)
+                # TODO: parse out-of-band data and notify entities
+            else:
+                _LOGGER.warning("Unhandled packet type: %s", ptype)
