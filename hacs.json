@@ -4,5 +4,9 @@
   "repo": "net4home",
   "category": "integration",
   "filename": "net4home",
-  "releases": "https://github.com/anynode/net4home/releases"
+  "render_readme": true,
+  "domains": [
+      "binary_sensor"
+    ],
+    "iot_class": "Local Push"  
 }
