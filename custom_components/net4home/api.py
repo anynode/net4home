@@ -1,8 +1,16 @@
 """Async TCP client for net4home bus connector with MD5 handshake."""
 import asyncio
 import hashlib
+import struct
 
-from .const import DEFAULT_PORT, DEFAULT_MI, DEFAULT_OBJADR
+from .const import (
+    DEFAULT_PORT,
+    DEFAULT_MI,
+    DEFAULT_OBJADR,
+    N4HIP_PT_PASSWORT_REQ,
+    N4H_IP_CLIENT_ACCEPTED,
+    DLL_REQ_VER,
+)
 
 class Net4HomeClient:
     def __init__(
@@ -24,21 +32,47 @@ class Net4HomeClient:
         self._writer: asyncio.StreamWriter | None = None
 
     async def async_connect(self) -> None:
-        """Establish connection and perform MD5 handshake."""
+        """Establish connection and perform MD5-based password handshake."""
+        # 1. Open TCP connection
         self._reader, self._writer = await asyncio.open_connection(
             self._host, self._port
         )
-        # Read 16-byte challenge from server
-        challenge = await self._reader.readexactly(16)
-        # Compute MD5 digest of challenge + password
-        digest = hashlib.md5(challenge + self._password.encode()).digest()
-        # Send digest back
-        self._writer.write(digest)
+
+        # 2. Compute MD5 of the password
+        md5_digest: bytes = hashlib.md5(self._password.encode()).digest()
+
+        # 3. Build the TN4H_security payload
+        algotyp = 1                    # MD5 algorithm
+        result = 0                     # reserved
+        length = len(md5_digest)      # should be 16
+        # Password field is 56 bytes: our digest + zero-padding
+        pw_field = md5_digest + b"\x00" * (56 - length)
+        application_typ = 0            # per spec
+        dll_ver = DLL_REQ_VER         # client DLL version constant
+
+        payload = (
+            struct.pack("<iii", algotyp, result, length)
+            + pw_field
+            + struct.pack("<ii", application_typ, dll_ver)
+        )
+
+        # 4. Prepend header (packet type + payload length)
+        header = struct.pack("<ii", N4HIP_PT_PASSWORT_REQ, len(payload))
+        self._writer.write(header + payload)
         await self._writer.drain()
-        # Await server response: 1 byte 0x01 indicates success
-        resp = await self._reader.readexactly(1)
-        if resp != b"\x01":
-            raise ConnectionError("MD5 handshake failed")
+
+        # 5. Read response header (type + length)
+        data = await self._reader.readexactly(8)
+        ptype, plen = struct.unpack("<ii", data)
+        if ptype != N4HIP_PT_PASSWORT_REQ:
+            raise ConnectionError(f"Unexpected response type: {ptype}")
+
+        # 6. Read response payload and check Result field
+        resp = await self._reader.readexactly(plen)
+        # The Result int is at offset 4 (after Algotyp), 4 bytes long
+        resp_result = struct.unpack("<i", resp[4:8])[0]
+        if resp_result != N4H_IP_CLIENT_ACCEPTED:
+            raise ConnectionError("Password handshake failed")
 
     async def async_disconnect(self) -> None:
         """Close the connection."""
@@ -59,4 +93,7 @@ class Net4HomeClient:
             raise ConnectionError("Not connected")
         while True:
             header = await self._reader.readexactly(6)
-            # TODO: parse header and payload
+            # TODO: parse header (e.g. packet type + length) and then payload
+            # length = parse_length_from_header(header)
+            # payload = await self._reader.readexactly(length)
+            # ...dispatch to handlers...

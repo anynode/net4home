@@ -7,7 +7,7 @@
   "dependencies": [],
   "config_flow": true,
   "zeroconf": [
-    "_net4home_n4hbuscon._tcp.local."
+    "_n4hbuscon._tcp"
   ],
   "iot_class": "local_push"
 }
