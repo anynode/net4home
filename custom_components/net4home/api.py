@@ -46,7 +46,7 @@ class Net4HomeClient:
         result = 0                     # reserved
         length = len(md5_digest)      # should be 16
         # Password field is 56 bytes: our digest + zero-padding
-        pw_field = md5_digest + b"\x00" * (56 - length)
+        pw_field = md5_digest.ljust(56, b'�')
         application_typ = 0            # per spec
         dll_ver = DLL_REQ_VER         # client DLL version constant
 
