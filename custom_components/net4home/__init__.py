@@ -24,8 +24,8 @@ async def async_setup_entry(
         entry.data["host"],
         entry.data["port"],
         entry.data["password"],
-        entry.data.get("mi"),
-        entry.data.get("objadr"),
+        entry.data.get("MI"),
+        entry.data.get("OBJADR"),
     )
     await client.async_connect()
     hass.data[DOMAIN][entry.entry_id] = client
