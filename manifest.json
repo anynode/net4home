@@ -2,7 +2,7 @@
   "domain": "net4home",
   "name": "net4home",
   "version": "0.1.0",
-  "documentation": "https://github.com/yourusername/ha-net4home",
+  "documentation": "https://github.com/anynode/net4home",
   "requirements": [],
   "dependencies": [],
   "config_flow": true,
