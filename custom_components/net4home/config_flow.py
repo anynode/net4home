@@ -18,8 +18,8 @@ class Net4HomeFlowHandler(
                 vol.Required("host"): str,
                 vol.Required("port", default=DEFAULT_PORT): int,
                 vol.Required("password"): str,
-                vol.Optional(CONF_MI, default=DEFAULT_MI): int,
-                vol.Optional(CONF_OBJADR, default=DEFAULT_OBJADR): int,
+                vol.Optional("MI", default=DEFAULT_MI): int,
+                vol.Optional("OBJADR", default=DEFAULT_OBJADR): int,
             })
             return self.async_show_form(
                 step_id="user",
@@ -32,8 +32,8 @@ class Net4HomeFlowHandler(
             user_input["host"],
             user_input["port"],
             user_input["password"],
-            user_input.get(CONF_MI),
-            user_input.get(CONF_OBJADR),
+            user_input.get("MI"),
+            user_input.get("OBJADR"),
         )
         try:
             await client.async_connect()
