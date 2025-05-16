@@ -57,7 +57,8 @@ class Net4HomeClient:
         algotyp = 1
         result = 0
         length = len(md5_digest)
-        pw_field = md5_digest.ljust(56, bytes([0]))
+        # Use bytes([0]) for null byte padding
+        pw_field = md5_digest + bytes([0]) * (56 - length)
         application_typ = 0
         dll_ver = DLL_REQ_VER
 
@@ -87,6 +88,16 @@ class Net4HomeClient:
         if resp_result != N4H_IP_CLIENT_ACCEPTED:
             raise ConnectionError("Password handshake failed with code %s" % resp_result)
         _LOGGER.info("Password handshake successful")
+        # 1. Register with bus connector
+        await self.async_register()  # send MI/OBJADR registration
+
+    async def async_register(self) -> None:
+        """Register this client at the Bus Connector using MI and OBJADR."""
+        _LOGGER.info("Registering client on bus: MI=%s OBJADR=%s", self._mi, self._objadr)
+        # Build minimal registration payload: MI (2 bytes), OBJADR (2 bytes), no data
+        payload = struct.pack("<HH", self._mi, self._objadr)
+        await self.send_packet(N4HIP_PT_PAKET, payload)
+        _LOGGER.debug("Registration packet sent: %s", payload.hex())
 
     async def async_disconnect(self) -> None:
         """Close the connection to the bus."""
