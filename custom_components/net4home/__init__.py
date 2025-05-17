@@ -29,9 +29,14 @@ async def async_setup_entry(
     )
     await client.async_connect()
     hass.data[DOMAIN][entry.entry_id] = client
+
+    # Start event listener in the background
+    hass.loop.create_task(client.async_listen())
+
     for platform in PLATFORMS:
         await hass.config_entries.async_forward_entry_setup(entry, platform)
     return True
+
 
 async def async_unload_entry(
     hass: HomeAssistant,

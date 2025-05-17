@@ -130,13 +130,28 @@ class Net4HomeClient:
         _LOGGER.debug("Received packet type=%s length=%s", ptype, length)
         return ptype, payload
 
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+
     async def async_listen(self) -> None:
-        """Continuously listen for incoming messages and dispatch."""
+        """Continuously listen for incoming messages and dispatch updates."""
         _LOGGER.info("Starting listener for bus messages")
         while True:
-            ptype, payload = await self.receive_packet()
+            try:
+                ptype, payload = await self.receive_packet()
+            except Exception as exc:
+                _LOGGER.error("Error reading packet: %s", exc)
+                break
+
             if ptype == N4HIP_PT_OOB_DATA_RAW:
-                _LOGGER.debug("Received raw OOB data: %s", payload)
-                # TODO: parse out-of-band data and notify entities
+                _LOGGER.debug("Received OOB data: %s", payload.hex())
+                # Example: first 2 bytes = OBJADR, next = value (adjust based on protocol!)
+                if len(payload) >= 3:
+                    objadr, value = struct.unpack("<HB", payload[:3])
+                    async_dispatcher_send(
+                        self._hass, f"net4home_update_{objadr}", value
+                    )
+                    _LOGGER.debug("Dispatched update for OBJADR %s: value %s", objadr, value)
+                else:
+                    _LOGGER.warning("OOB payload too short: %s", payload.hex())
             else:
                 _LOGGER.warning("Unhandled packet type: %s", ptype)
