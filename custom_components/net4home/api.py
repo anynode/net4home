@@ -57,6 +57,7 @@ class Net4HomeClient:
         length = len(md5_digest)
         # Use bytes([0]) for null byte padding
         pw_field = md5_digest + bytes([0]) * (56 - length)
+
         application_typ = 0
         dll_ver = DLL_REQ_VER
 
@@ -73,6 +74,7 @@ class Net4HomeClient:
         )
         self._writer.write(header + payload)
         await self._writer.drain()
+        _LOGGER.debug("Handshake-Paket gesendet, warte auf Antwort...")
 
         resp_header = await self._reader.readexactly(8)
         ptype, plen = struct.unpack("<ii", resp_header)
