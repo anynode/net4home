@@ -1,0 +1,4 @@
+"host_not_found": "Host konnte nicht gefunden werden",
+"timeout": "Timeout beim Verbindungsaufbau oder Handshake",
+"cannot_connect": "Verbindung konnte nicht hergestellt werden",
+"unknown": "Unbekannter Fehler"
