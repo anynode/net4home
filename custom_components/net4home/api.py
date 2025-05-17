@@ -58,7 +58,8 @@ class Net4HomeClient:
         result = 0
         length = len(md5_digest)
         # Use bytes([0]) for null byte padding
-        pw_field = md5_digest + bytes([0]) * (56 - length)
+        pw_field = md5_digest + bytes([0]) * (56 - len(md5_digest))
+
         application_typ = 0
         dll_ver = DLL_REQ_VER
 
