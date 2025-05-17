@@ -74,7 +74,6 @@ class Net4HomeClient:
             self._writer.write(header + payload)
             await self._writer.drain()
             _LOGGER.info("Handshake-Paket gesendet, warte **nicht** auf Antwort!")
-            # NICHT auf Antwort warten! Gleich weiter machen.
         except Exception as e:
             _LOGGER.error("Handshake with bus connector failed: %s", e)
             raise
@@ -117,6 +116,11 @@ class Net4HomeClient:
         header = await self._reader.readexactly(8)
         ptype, length = struct.unpack("<ii", header)
         payload = await self._reader.readexactly(length)
+        # NEU: Jedes Paket komplett als HEX ins Log schreiben
+        _LOGGER.info(
+            "Empfangenes Paket: typ=%s, len=%s, header+payload (hex): %s",
+            ptype, length, (header + payload).hex()
+        )
         _LOGGER.debug("Received packet type=%s length=%s", ptype, length)
         return ptype, payload
 
