@@ -49,17 +49,14 @@ class Net4HomeClient:
         )
         _LOGGER.debug("TCP connection established")
 
-        # MD5-based security handshake
         md5_digest = hashlib.md5(self._password.encode()).digest()
         _LOGGER.debug("Computed MD5 digest: %s", md5_digest.hex())
 
-        # Build security payload: algo, result, length, digest + padding, applicationtyp, dllver
         algotyp = 1
         result = 0
         length = len(md5_digest)
         # Use bytes([0]) for null byte padding
-        pw_field = md5_digest + bytes([0]) * (56 - len(md5_digest))
-
+        pw_field = md5_digest + bytes([0]) * (56 - length)
         application_typ = 0
         dll_ver = DLL_REQ_VER
 
@@ -77,7 +74,6 @@ class Net4HomeClient:
         self._writer.write(header + payload)
         await self._writer.drain()
 
-        # Await response
         resp_header = await self._reader.readexactly(8)
         ptype, plen = struct.unpack("<ii", resp_header)
         _LOGGER.debug("Received handshake response header: ptype=%s plen=%s", ptype, plen)
@@ -89,13 +85,11 @@ class Net4HomeClient:
         if resp_result != N4H_IP_CLIENT_ACCEPTED:
             raise ConnectionError("Password handshake failed with code %s" % resp_result)
         _LOGGER.info("Password handshake successful")
-        # Register with bus connector
-        await self.async_register()  # send MI/OBJADR registration
+        await self.async_register()
 
     async def async_register(self) -> None:
         """Register this client at the Bus Connector using MI and OBJADR."""
         _LOGGER.info("Registering client on bus: MI=%s OBJADR=%s", self._mi, self._objadr)
-        # Build minimal registration payload: MI (2 bytes), OBJADR (2 bytes), no data
         payload = struct.pack("<HH", self._mi, self._objadr)
         await self.send_packet(N4HIP_PT_PAKET, payload)
         _LOGGER.debug("Registration packet sent: %s", payload.hex())
@@ -131,28 +125,13 @@ class Net4HomeClient:
         _LOGGER.debug("Received packet type=%s length=%s", ptype, length)
         return ptype, payload
 
-from homeassistant.helpers.dispatcher import async_dispatcher_send
-
     async def async_listen(self) -> None:
-        """Continuously listen for incoming messages and dispatch updates."""
+        """Continuously listen for incoming messages and dispatch."""
         _LOGGER.info("Starting listener for bus messages")
         while True:
-            try:
-                ptype, payload = await self.receive_packet()
-            except Exception as exc:
-                _LOGGER.error("Error reading packet: %s", exc)
-                break
-
+            ptype, payload = await self.receive_packet()
             if ptype == N4HIP_PT_OOB_DATA_RAW:
-                _LOGGER.debug("Received OOB data: %s", payload.hex())
-                # Example: first 2 bytes = OBJADR, next = value (adjust based on protocol!)
-                if len(payload) >= 3:
-                    objadr, value = struct.unpack("<HB", payload[:3])
-                    async_dispatcher_send(
-                        self._hass, f"net4home_update_{objadr}", value
-                    )
-                    _LOGGER.debug("Dispatched update for OBJADR %s: value %s", objadr, value)
-                else:
-                    _LOGGER.warning("OOB payload too short: %s", payload.hex())
+                _LOGGER.debug("Received raw OOB data: %s", payload)
+                # TODO: parse out-of-band data and notify entities
             else:
                 _LOGGER.warning("Unhandled packet type: %s", ptype)
