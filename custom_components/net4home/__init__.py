@@ -1,5 +1,6 @@
 """Initialize the net4home integration."""
 import asyncio
+import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -7,10 +8,13 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .api import Net4HomeClient
 
+_LOGGER = logging.getLogger(__name__)
+
 PLATFORMS = ["binary_sensor"]  # Start with one platform
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the net4home component."""
+    _LOGGER.debug("Calling async_setup for net4home")
     hass.data.setdefault(DOMAIN, {})
     return True
 
@@ -19,27 +23,36 @@ async def async_setup_entry(
     entry: ConfigEntry
 ) -> bool:
     """Set up a config entry."""
-    client = Net4HomeClient(
-        hass,
-        entry.data["host"],
-        entry.data["port"],
-        entry.data["password"],
-        entry.data.get("MI"),
-        entry.data.get("OBJADR"),
-    )
-    await client.async_connect()
-    hass.data[DOMAIN][entry.entry_id] = client
-    # Start event listener
-    hass.loop.create_task(client.async_listen())
-    for platform in PLATFORMS:
-        await hass.config_entries.async_forward_entry_setup(entry, platform)
-    return True
+    _LOGGER.debug("async_setup_entry called for net4home, entry: %s", entry)
+    try:
+        client = Net4HomeClient(
+            hass,
+            entry.data["host"],
+            entry.data["port"],
+            entry.data["password"],
+            entry.data.get("MI"),
+            entry.data.get("OBJADR"),
+        )
+        _LOGGER.debug("Net4HomeClient created")
+        await client.async_connect()
+        _LOGGER.debug("Net4HomeClient connected")
+        hass.data[DOMAIN][entry.entry_id] = client
+        hass.loop.create_task(client.async_listen())
+        for platform in PLATFORMS:
+            _LOGGER.debug("Forwarding entry setup to platform: %s", platform)
+            await hass.config_entries.async_forward_entry_setup(entry, platform)
+        _LOGGER.info("async_setup_entry for net4home finished")
+        return True
+    except Exception as e:
+        _LOGGER.exception("Error in async_setup_entry: %s", e)
+        return False
 
 async def async_unload_entry(
     hass: HomeAssistant,
     entry: ConfigEntry
 ) -> bool:
     """Unload a config entry."""
+    _LOGGER.debug("async_unload_entry called for net4home")
     unload_ok = all(
         await asyncio.gather(
             *[
