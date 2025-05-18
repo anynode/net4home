@@ -1,52 +1,10 @@
 import asyncio
 import logging
 import struct
-import hashlib
 
-from .const import (
-    DEFAULT_PORT,
-    DEFAULT_MI,
-    DEFAULT_OBJADR,
-    N4HIP_PT_PASSWORT_REQ,
-    N4HIP_PT_PAKET,
-    N4HIP_PT_OOB_DATA_RAW,
-    DLL_REQ_VER,
-)
+from .const import DEFAULT_PORT, DEFAULT_MI, DEFAULT_OBJADR
 
 _LOGGER = logging.getLogger(__name__)
-
-def get_hash_for_server2(password: str) -> bytes:
-    """
-    Port der zentralen Hashfunktion aus md5User.pas/md5.pas:
-    - Latin1-Encoding (wie Delphi-Ansicht von AnsiString)
-    - auf 16 Bytes mit Nullbytes gepadded
-    - klassischer MD5-Hash drüber
-    - 16 Byte Digest
-    """
-    pw_bytes = password.encode('latin1')
-    pw_buf = pw_bytes.ljust(16, b'\0')
-    md5_digest = hashlib.md5(pw_buf).digest()
-    return md5_digest
-
-def build_login_handshake(password: str, algotyp: int = 1, dll_ver: int = 1, application_typ: int = 0):
-    """
-    Baut das vollständige Login-Handshake-Paket für den Busconnector.
-    - Nutzt die modifizierte Hashfunktion wie in md5User.pas.
-    """
-    md5_digest = get_hash_for_server2(password)
-    password_field = md5_digest.ljust(56, b'\0')
-    payload = struct.pack(
-        "<iii56sii",
-        algotyp,
-        0,
-        16,
-        password_field,
-        application_typ,
-        dll_ver
-    )
-    header = struct.pack("<ii", 4012, len(payload))
-    handshake = header + payload
-    return handshake
 
 def n4hbus_compress_section(p_uncompressed: str) -> str:
     """
@@ -107,33 +65,43 @@ def n4hbus_decomp_section(p2: str, fs: int) -> str:
     return ret
 
 class Net4HomeClient:
-    def __init__(
-        self,
-        hass,
-        host,
-        port=DEFAULT_PORT,
-        password="",
-        mi=DEFAULT_MI,
-        objadr=DEFAULT_OBJADR
-    ):
+    def __init__(self, hass, host, port=DEFAULT_PORT, password="", mi=DEFAULT_MI, objadr=DEFAULT_OBJADR):
         self._hass = hass
         self._host = host
         self._port = port
-        self._password = password
+        self._password = password  # aktuell ungenutzt
         self._mi = mi
         self._objadr = objadr
         self._reader = None
         self._writer = None
- 
+
     async def async_connect(self):
         _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
         self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
         _LOGGER.debug("TCP connection established")
 
-        handshake = build_login_handshake(self._password)
-        self._writer.write(handshake)
+        # Dynamisch: MI/OBJADR in Payload einbauen
+        mi_hex = f"{self._mi:04x}"
+        objadr_hex = f"{self._objadr:04x}"
+
+        # Zusammensetzen des unkomprimierten Payloads nach Perl/FHEM-Vorbild
+        payload_uncompressed = (
+            "ac0f400a"
+            + mi_hex
+            + "bc024046"
+            + objadr_hex
+            + "04870000"
+            + "00c00000"
+            + "0200"
+        )
+
+        compressed = n4hbus_compress_section(payload_uncompressed)
+        # Prepend Packet-Type (0x19 = 25, Little Endian)
+        packet = bytes.fromhex("19000000" + compressed)
+
+        self._writer.write(packet)
         await self._writer.drain()
-        _LOGGER.info("Login-Handshake gesendet (hex): %s", handshake.hex())
+        _LOGGER.warning("Compressed Init-Paket gesendet (hex): %s", packet.hex())
 
     async def async_disconnect(self):
         _LOGGER.info("Disconnecting from net4home bus")
