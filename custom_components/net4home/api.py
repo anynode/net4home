@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import struct
-from typing import Any, Tuple
 import hashlib
 
 from .const import (
@@ -18,106 +17,151 @@ _LOGGER = logging.getLogger(__name__)
 
 def get_hash_for_server2(password: str) -> bytes:
     """
-    Portiert die 'GetHashForServer2' aus md5User.pas/md5.pas nach Python.
-    Gibt exakt denselben 16-Byte-Hash zurück, den der Server erwartet.
+    Port der zentralen Hashfunktion aus md5User.pas/md5.pas:
+    - Latin1-Encoding (wie Delphi-Ansicht von AnsiString)
+    - auf 16 Bytes mit Nullbytes gepadded
+    - klassischer MD5-Hash drüber
+    - 16 Byte Digest
     """
-    pw_bytes = password.encode('latin1')  # oft ist in Delphi Latin1 oder ASCII verwendet
+    pw_bytes = password.encode('latin1')
     pw_buf = pw_bytes.ljust(16, b'\0')
-    md5 = hashlib.md5()
-    md5.update(pw_buf)
-    digest = md5.digest()
-    return digest  # 16 Bytes
+    md5_digest = hashlib.md5(pw_buf).digest()
+    return md5_digest
+
+def build_login_handshake(password: str, algotyp: int = 1, dll_ver: int = 1, application_typ: int = 0):
+    """
+    Baut das vollständige Login-Handshake-Paket für den Busconnector.
+    - Nutzt die modifizierte Hashfunktion wie in md5User.pas.
+    """
+    md5_digest = get_hash_for_server2(password)
+    password_field = md5_digest.ljust(56, b'\0')
+    payload = struct.pack(
+        "<iii56sii",
+        algotyp,
+        0,
+        16,
+        password_field,
+        application_typ,
+        dll_ver
+    )
+    header = struct.pack("<ii", 4012, len(payload))
+    handshake = header + payload
+    return handshake
+
+def n4hbus_compress_section(p_uncompressed: str) -> str:
+    """
+    Port von N4HBUS_CompressSection aus Perl/Pascal nach Python.
+    """
+    cs = sum(int(p_uncompressed[i*2:i*2+2], 16) for i in range(len(p_uncompressed)//2))
+    length = len(p_uncompressed) // 2
+    hi = length >> 8
+    lo = length & 0xFF
+    p_compressed = f"{hi:02X}{lo:02X}"
+    p = 0
+    while p < length:
+        p_compressed += p_uncompressed[p*2:p*2+2]
+        p += 1
+    p_compressed += "C0"
+    p_compressed += f"{(cs>>24)&0xFF:02X}{(cs>>16)&0xFF:02X}{(cs>>8)&0xFF:02X}{cs&0xFF:02X}"
+    plen = len(p_compressed) // 2
+    p_compressed = f"{plen:02X}000000" + p_compressed
+    return p_compressed
+
+def n4hbus_decomp_section(p2: str, fs: int) -> str:
+    """
+    Port von N4HBUS_decompSection aus Perl/Pascal nach Python.
+    """
+    ret = ''
+    zaehler = 0
+    ende = False
+    err = False
+    gPout = ''
+    maxoutlen = 372
+    while (zaehler < fs) and (len(gPout) < maxoutlen*2) and not ende and not err:
+        bb = p2[zaehler*2:zaehler*2+2]
+        bbval = int(bb, 16)
+        if (bbval & 192) == 192:
+            ende = True
+            zaehler += 1
+        elif (bbval & 192) == 0:
+            bc = p2[(zaehler+1)*2:(zaehler+1)*2+2]
+            inBlock = (int(bb, 16) << 8) + int(bc, 16)
+            zaehler += 2
+            while inBlock > 0:
+                gPout += p2[zaehler*2:zaehler*2+2]
+                zaehler += 1
+                inBlock -= 1
+        elif (bbval & 192) == 64:
+            bc = p2[(zaehler+1)*2:(zaehler+1)*2+2]
+            inBlock = ((int(bb, 16) << 8) + int(bc, 16)) & 16383
+            bbval_next = p2[(zaehler+2)*2:(zaehler+2)*2+2]
+            zaehler += 3
+            while inBlock > 0:
+                gPout += bbval_next
+                inBlock -= 1
+        elif (bbval & 0xC0) == 0x80:
+            err = True
+            zaehler += 1
+    if (not err) and ende:
+        ret = gPout
+    return ret
 
 class Net4HomeClient:
     def __init__(
         self,
-        hass: Any,
-        host: str,
-        port: int = DEFAULT_PORT,
-        password: str = "",
-        mi: int = DEFAULT_MI,
-        objadr: int = DEFAULT_OBJADR,
-    ) -> None:
+        hass,
+        host,
+        port=DEFAULT_PORT,
+        password="",
+        mi=DEFAULT_MI,
+        objadr=DEFAULT_OBJADR
+    ):
         self._hass = hass
         self._host = host
         self._port = port
         self._password = password
         self._mi = mi
         self._objadr = objadr
-        self._reader: asyncio.StreamReader | None = None
-        self._writer: asyncio.StreamWriter | None = None
-        _LOGGER.debug(
-            "Initialized Net4HomeClient: host=%s port=%s MI=%s OBJADR=%s",
-            host, port, mi, objadr,
-        )
-
-    async def async_connect(self) -> None:
+        self._reader = None
+        self._writer = None
+ 
+    async def async_connect(self):
         _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
-        try:
-            self._reader, self._writer = await asyncio.open_connection(
-                self._host, self._port
-            )
-        except Exception as e:
-            _LOGGER.error("Could not open TCP connection: %s", e)
-            raise
-
+        self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
         _LOGGER.debug("TCP connection established")
 
-        # Modifizierte MD5-User-Hash-Funktion anwenden
-        md5_digest = get_hash_for_server2(self._password)
-        _LOGGER.debug("MD5-User Digest: %s", md5_digest.hex())
-
-        # Beispiel: Authentifizierungs-/Init-Paket mit Hash (Passe Struktur ggf. an!)
-        # Falls dein Protokoll wie vorher Hex-Paket + Hash an festen Stellen erwartet:
-        # → Hier muss das Paket exakt wie in Perl/FHEM aufgebaut werden
-        # Für Testzwecke: Baue das Paket dynamisch zusammen, z.B. als Template
-
-        # Beispiel für "Handshake"-Paket:
-        packet_type = N4HIP_PT_PASSWORT_REQ  # z.B. 4012
-        payload = md5_digest + bytes([0]) * (56 - len(md5_digest))  # ggf. anpassen!
-
-        # Hier struct.pack anpassen je nach Protokoll (z.B. mit weiteren Feldern wie MI, OBJADR, DLL_VER)
-        # Das ist ein Beispiel – siehe Implementation Guide für genaue Reihenfolge!
-        algotyp = 1
-        result = 0
-        length = len(md5_digest)
-        application_typ = 0
-        dll_ver = DLL_REQ_VER
-
-        packet = (
-            struct.pack("<iii", algotyp, result, length)
-            + payload
-            + struct.pack("<ii", application_typ, dll_ver)
-        )
-        header = struct.pack("<ii", packet_type, len(packet))
-        handshake = header + packet
-
+        handshake = build_login_handshake(self._password)
         self._writer.write(handshake)
         await self._writer.drain()
-        _LOGGER.info("Handshake-Paket mit modifiziertem Hash gesendet (hex): %s", handshake.hex())
+        _LOGGER.info("Login-Handshake gesendet (hex): %s", handshake.hex())
 
-        # → Optional auf Antwort warten, je nach Protokoll
-
-    async def async_disconnect(self) -> None:
+    async def async_disconnect(self):
         _LOGGER.info("Disconnecting from net4home bus")
         if self._writer:
             self._writer.close()
             await self._writer.wait_closed()
             _LOGGER.debug("Connection closed")
 
-    async def receive_packet(self) -> Tuple[int, bytes]:
+    async def receive_packet(self):
         if not self._reader:
             raise ConnectionError("Not connected to bus")
         header = await self._reader.readexactly(8)
         ptype, length = struct.unpack("<ii", header)
         payload = await self._reader.readexactly(length)
+        hex_payload = (header + payload).hex()
         _LOGGER.info(
             "Empfangenes Paket: typ=%s, len=%s, header+payload (hex): %s",
-            ptype, length, (header + payload).hex()
+            ptype, length, hex_payload
         )
+        # Dekompression falls notwendig:
+        try:
+            decompressed = n4hbus_decomp_section(payload.hex(), len(payload))
+            _LOGGER.info("Dekomprimierter Payload: %s", decompressed)
+        except Exception as ex:
+            _LOGGER.error("Fehler bei der Dekomprimierung: %s", ex)
         return ptype, payload
 
-    async def async_listen(self) -> None:
+    async def async_listen(self):
         _LOGGER.info("Starting listener for bus messages")
         while True:
             try:
