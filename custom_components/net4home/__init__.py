@@ -10,7 +10,7 @@ from .api import Net4HomeClient
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["binary_sensor"]  # Start with one platform
+PLATFORMS = ["binary_sensor"]  # oder ["binary_sensor", "sensor", "switch", ...]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the net4home component."""
@@ -38,9 +38,8 @@ async def async_setup_entry(
         _LOGGER.debug("Net4HomeClient connected")
         hass.data[DOMAIN][entry.entry_id] = client
         hass.loop.create_task(client.async_listen())
-        for platform in PLATFORMS:
-            _LOGGER.debug("Forwarding entry setup to platform: %s", platform)
-            await hass.config_entries.async_forward_entry_setup(entry, platform)
+        # NEU: Zukunftssichere Mehrfachregistrierung der Plattformen!
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         _LOGGER.info("async_setup_entry for net4home finished")
         return True
     except Exception as e:
