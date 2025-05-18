@@ -1,6 +1,8 @@
+"""Async TCP client for net4home bus connector using Perl-style Init-Paket."""
 import asyncio
 import logging
 from typing import Any, Tuple
+
 from .const import (
     DEFAULT_PORT,
     DEFAULT_MI,
@@ -22,7 +24,7 @@ class Net4HomeClient:
         self._hass = hass
         self._host = host
         self._port = port
-        self._password = password
+        self._password = password 
         self._mi = mi
         self._objadr = objadr
         self._reader: asyncio.StreamReader | None = None
@@ -33,6 +35,7 @@ class Net4HomeClient:
         )
 
     async def async_connect(self) -> None:
+        """Connect and send the Perl-style init packet."""
         _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
         try:
             self._reader, self._writer = await asyncio.open_connection(
@@ -52,6 +55,7 @@ class Net4HomeClient:
         _LOGGER.warning("Init-Paket wie Perl gesendet (hex): %s", init_bytes.hex())
 
     async def async_disconnect(self) -> None:
+        """Close the connection to the bus."""
         _LOGGER.info("Disconnecting from net4home bus")
         if self._writer:
             self._writer.close()
@@ -59,6 +63,7 @@ class Net4HomeClient:
             _LOGGER.debug("Connection closed")
 
     async def receive_packet(self) -> Tuple[int, bytes]:
+        """Receive and parse a framed packet from the bus."""
         if not self._reader:
             raise ConnectionError("Not connected to bus")
         header = await self._reader.readexactly(8)
@@ -71,11 +76,13 @@ class Net4HomeClient:
         return ptype, payload
 
     async def async_listen(self) -> None:
+        """Continuously listen for incoming messages and dispatch."""
         _LOGGER.info("Starting listener for bus messages")
         while True:
             try:
                 ptype, payload = await self.receive_packet()
                 _LOGGER.debug("Received packet type=%s payload (hex)=%s", ptype, payload.hex())
+                # TODO: Event-Auswertung und Dispatcher
             except Exception as e:
                 _LOGGER.error("Exception in listener loop: %s", e)
                 break
