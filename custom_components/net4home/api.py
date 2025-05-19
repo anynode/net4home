@@ -6,7 +6,6 @@ from typing import Optional
 from .md5_custom import get_hash_for_server2
 from .compressor import compress, decompress, CompressionError
 
-# Konstanten (kannst du auch aus const.py importieren)
 N4HIP_PT_PASSWORT_REQ = 4012
 
 class Net4HomeApi:
@@ -62,9 +61,13 @@ class Net4HomeApi:
         packet_len = len(compressed_packet)
         packet_with_len = struct.pack("<I", packet_len) + compressed_packet
 
+        self._logger.debug(f"Länge komprimiertes Paket: {packet_len}")
+        self._logger.debug(f"Gesendetes Paket mit Länge (hex): {packet_with_len[:4].hex()}")
+        self._logger.debug(f"Gesendetes Paket komplett (hex): {packet_with_len.hex()}")
+
         self._writer.write(packet_with_len)
         await self._writer.drain()
-        self._logger.debug(f"Passwortpaket gesendet (mit 4-Byte Längenpräfix): {packet_with_len.hex()}")
+        self._logger.debug("Passwortpaket gesendet")
 
         await self._read_packets(self._reader)
 
