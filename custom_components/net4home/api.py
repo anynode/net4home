@@ -7,6 +7,9 @@ from .const import DEFAULT_PORT, DEFAULT_MI, DEFAULT_OBJADR
 _LOGGER = logging.getLogger(__name__)
 
 def n4hbus_compress_section(p_uncompressed: str) -> str:
+    """
+    Port von N4HBUS_CompressSection aus Perl/Pascal nach Python.
+    """
     cs = sum(int(p_uncompressed[i*2:i*2+2], 16) for i in range(len(p_uncompressed)//2))
     length = len(p_uncompressed) // 2
     hi = length >> 8
@@ -23,6 +26,9 @@ def n4hbus_compress_section(p_uncompressed: str) -> str:
     return p_compressed
 
 def n4hbus_decomp_section(p2: str, fs: int) -> str:
+    """
+    Port von N4HBUS_decompSection aus Perl/Pascal nach Python.
+    """
     ret = ''
     zaehler = 0
     ende = False
@@ -58,32 +64,6 @@ def n4hbus_decomp_section(p2: str, fs: int) -> str:
         ret = gPout
     return ret
 
-def log_parsed_packet(header: bytes, payload: bytes):
-    """
-    Ausgabe wie OBJ 0056   05601 >  12021 03 32 00 00
-    """
-    try:
-        if len(payload) < 74:
-            _LOGGER.warning("Paket zu kurz für Parsing: %s", payload.hex())
-            return
-        type8 = payload[0]
-        ipsrc = int.from_bytes(payload[1:3], "little")
-        ipdest = int.from_bytes(payload[3:5], "little")
-        objsrc = int.from_bytes(payload[5:7], "little")
-        ddatalen = payload[7]
-        ddata = payload[8:8+ddatalen]
-        objdst = ipdest
-
-        mi_str = f"{ipsrc:05d}"
-        objsrc_str = f"{objsrc:05d}"
-        objdst_str = f"{objdst:05d}"
-        objadr_str = f"{objdst:04x}".upper()
-        ddata_str = " ".join(f"{b:02X}" for b in ddata)
-        logstr = f"OBJ {objadr_str}   {mi_str} >  {objdst_str} {type8:02X} {ddata_str}"
-        _LOGGER.info(logstr)
-    except Exception as ex:
-        _LOGGER.error("Fehler beim Paket-Parsing: %s", ex)
-
 class Net4HomeApi:
     def __init__(self, hass, host, port=DEFAULT_PORT, password="", mi=DEFAULT_MI, objadr=DEFAULT_OBJADR):
         self._hass = hass
@@ -100,11 +80,11 @@ class Net4HomeApi:
         self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
         _LOGGER.debug("TCP connection established")
 
-        # MI/OBJADR als Little Endian (2 bytes je Feld!)
-        mi_hex = f"{self._mi & 0xFF:02x}{(self._mi >> 8) & 0xFF:02x}"
-        objadr_hex = f"{self._objadr & 0xFF:02x}{(self._objadr >> 8) & 0xFF:02x}"
+        # Dynamisch: MI/OBJADR in Payload einbauen
+        mi_hex = f"{self._mi:04x}"
+        objadr_hex = f"{self._objadr:04x}"
 
-        # Zusammensetzen des unkomprimierten Payloads
+        # Zusammensetzen des unkomprimierten Payloads nach Perl/FHEM-Vorbild
         payload_uncompressed = (
             "ac0f400a"
             + mi_hex
@@ -116,11 +96,12 @@ class Net4HomeApi:
         )
 
         compressed = n4hbus_compress_section(payload_uncompressed)
+        # Prepend Packet-Type (0x19 = 25, Little Endian)
         packet = bytes.fromhex("19000000" + compressed)
 
-        _LOGGER.warning("Compressed Init-Paket gesendet (hex): %s", packet.hex())
         self._writer.write(packet)
         await self._writer.drain()
+        _LOGGER.warning("Compressed Init-Paket gesendet (hex): %s", packet.hex())
 
     async def async_disconnect(self):
         _LOGGER.info("Disconnecting from net4home bus")
@@ -136,14 +117,14 @@ class Net4HomeApi:
         ptype, length = struct.unpack("<ii", header)
         payload = await self._reader.readexactly(length)
         hex_payload = (header + payload).hex()
-        log_parsed_packet(header, payload)
-        _LOGGER.debug(
+        _LOGGER.info(
             "Empfangenes Paket: typ=%s, len=%s, header+payload (hex): %s",
             ptype, length, hex_payload
         )
+        # Dekompression falls notwendig:
         try:
             decompressed = n4hbus_decomp_section(payload.hex(), len(payload))
-            _LOGGER.debug("Dekomprimierter Payload: %s", decompressed)
+            _LOGGER.info("Dekomprimierter Payload: %s", decompressed)
         except Exception as ex:
             _LOGGER.error("Fehler bei der Dekomprimierung: %s", ex)
         return ptype, payload
@@ -153,6 +134,7 @@ class Net4HomeApi:
         while True:
             try:
                 ptype, payload = await self.receive_packet()
+                _LOGGER.debug("Received packet type=%s payload (hex)=%s", ptype, payload.hex())
             except Exception as e:
                 _LOGGER.error("Exception in listener loop: %s", e)
                 break
