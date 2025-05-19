@@ -14,12 +14,13 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             client = Net4HomeApi(
-                host=user_input["host"],
-                port=user_input["port"],
-                password=user_input["password"],
-                mi=user_input.get(CONF_MI),
-                objadr=user_input.get(CONF_OBJADR)
-        )
+                    self.hass,
+                    user_input["host"],
+                    user_input["port"],
+                    user_input["password"],
+                    user_input.get(CONF_MI),
+                    user_input.get(CONF_OBJADR)
+            )
             
             try:
                 await client.async_connect()
