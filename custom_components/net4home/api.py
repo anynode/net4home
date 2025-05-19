@@ -4,9 +4,9 @@ import logging
 from typing import Optional
 
 from .md5_custom import get_hash_for_server2
-from .compressor import compress, decompress
+from .compressor import compress, decompress, CompressionError
 
-# Definiere den Konstantenwert, falls noch nicht importiert
+# Konstanten, aus const.py oder hier als Fallback
 N4HIP_PT_PASSWORT_REQ = 4012
 
 class Net4HomeApi:
@@ -30,16 +30,6 @@ class Net4HomeApi:
         self._writer: Optional[asyncio.StreamWriter] = None
 
     def _build_password_packet(self, password: str) -> bytes:
-        """
-        Build the password request packet (TN4Hpaket) with:
-        - type8 = N4HIP_PT_PASSWORT_REQ & 0xFF (172)
-        - ipsrc = 0 (default)
-        - ipdest = 0 (default)
-        - objsrc = configured objsrc (e.g., 32700)
-        - ddatalen = 16
-        - ddata = modified MD5 hash of the password
-        - checksum = sum of all bytes modulo 256
-        """
         type8 = N4HIP_PT_PASSWORT_REQ & 0xFF
         ipsrc = 0
         ipdest = 0
@@ -58,50 +48,81 @@ class Net4HomeApi:
         return packet
 
     async def async_connect(self) -> None:
-        """Connect to the Bus connector and send the password request."""
-        self._logger.debug(f"Connecting to net4home Bus connector at {self._host}:{self._port}")
+        self._logger.debug(f"Verbinde mit net4home Busconnector bei {self._host}:{self._port}")
         self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
-        self._logger.debug("TCP connection established")
+        self._logger.debug("TCP-Verbindung hergestellt")
 
         packet_bytes = self._build_password_packet(self._password)
+        self._logger.debug(f"Passwortpaket (unkomprimiert): {packet_bytes.hex()}")
 
-        self._logger.debug(f"Password packet (uncompressed): {packet_bytes.hex()}")
-
-        """compressed_packet = compress(packet_bytes)"""
-        compressed_packet = packet_bytes
-        
-        self._logger.debug(f"Password packet (compressed): {compressed_packet.hex()}")
+        compressed_packet = compress(packet_bytes)
+        self._logger.debug(f"Passwortpaket (komprimiert): {compressed_packet.hex()}")
 
         self._writer.write(compressed_packet)
         await self._writer.drain()
-        self._logger.debug("Password packet sent")
-    
-        compressed_response = await self._reader.read(4096)
-        self._logger.debug(f"Received compressed response: {compressed_response.hex()}")
+        self._logger.debug("Passwortpaket gesendet")
 
-        if not compressed_response:
-            raise ConnectionError("No response from server")
+        await self._read_packets(self._reader)
 
-        try:
-            response = decompress(compressed_response)
-        except Exception as e:
-            self._logger.error(f"Failed to decompress server response: {e}")
-            raise
+    async def _read_packets(self, reader: asyncio.StreamReader) -> None:
+        while True:
+            try:
+                length_bytes = await reader.readexactly(4)
+            except asyncio.IncompleteReadError:
+                self._logger.warning("Verbindung geschlossen (IncompleteReadError)")
+                break
 
-        self._logger.debug(f"Decompressed server response: {response.hex()}")
+            payload_len = struct.unpack("<I", length_bytes)[0]
+            self._logger.debug(f"Erwarte Payload mit Länge {payload_len} Bytes")
 
-        if len(response) < 1:
-            raise ConnectionError("Empty response from server")
+            try:
+                payload_compressed = await reader.readexactly(payload_len)
+            except asyncio.IncompleteReadError:
+                self._logger.warning("Verbindung geschlossen beim Lesen der Payload")
+                break
 
-        response_type = response[0]
-        if response_type != (N4HIP_PT_PASSWORT_REQ & 0xFF):
-            raise ConnectionError(f"Unexpected response type from server: {response_type}")
+            self._logger.debug(f"Empfangene komprimierte Payload: {payload_compressed.hex()}")
 
-        self._logger.info("Password accepted by server")
+            try:
+                payload = decompress(payload_compressed)
+                self._logger.debug(f"Dekomprimierte Payload: {payload.hex()}")
+            except CompressionError as err:
+                self._logger.error(f"Dekompression fehlgeschlagen: {err}")
+                continue
+
+            self._process_packet(payload)
+
+    def _process_packet(self, packet: bytes) -> None:
+        if len(packet) < 8:
+            self._logger.warning("Empfangenes Paket zu kurz")
+            return
+
+        type8 = packet[0]
+        ipsrc, ipdest, objsrc = struct.unpack("<HHH", packet[1:7])
+        ddatalen = packet[7]
+
+        self._logger.debug(
+            f"Paket empfangen: type8=0x{type8:02X}, ipsrc={ipsrc}, ipdest={ipdest}, objsrc={objsrc}, ddatalen={ddatalen}"
+        )
+
+        if len(packet) < 8 + ddatalen + 1:
+            self._logger.warning("Paket zu kurz für Payload + Checksumme")
+            return
+
+        ddata = packet[8 : 8 + ddatalen]
+        checksum = packet[8 + ddatalen]
+
+        calc_checksum = sum(packet[:8 + ddatalen]) % 256
+        if checksum != calc_checksum:
+            self._logger.warning(f"Ungültige Checksumme: erhalten=0x{checksum:02X}, berechnet=0x{calc_checksum:02X}")
+
+        if type8 == (N4HIP_PT_PASSWORT_REQ & 0xFF):
+            self._logger.info("Passwort-Response empfangen")
+        else:
+            self._logger.info(f"Unbekannter Pakettyp empfangen: 0x{type8:02X}")
 
     async def async_disconnect(self) -> None:
-        """Close the TCP connection."""
         if self._writer:
             self._writer.close()
             await self._writer.wait_closed()
-            self._logger.debug("TCP connection closed")
+            self._logger.debug("TCP-Verbindung geschlossen")
