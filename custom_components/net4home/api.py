@@ -65,9 +65,10 @@ class Net4HomeApi:
         self._logger.debug(f"Gesendetes Paket mit Länge (hex): {packet_with_len[:4].hex()}")
         self._logger.debug(f"Gesendetes Paket komplett (hex): {packet_with_len.hex()}")
 
-        self._writer.write(packet_with_len)
+        """self._writer.write(packet_with_len)"""
+        self._writer.write("190000000002ac0f400a000002bc02404600000487000000c000000200"
         await self._writer.drain()
-        self._logger.debug("Passwortpaket gesendet")
+        self._logger.debug("Fake Passwortpaket gesendet")
 
         await self._read_packets(self._reader)
 
