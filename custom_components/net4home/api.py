@@ -21,8 +21,8 @@ class Net4HomeApi:
         self._host = host
         self._port = port
         self._password = password
-        self._mi = mi
-        self._objsrc = objsrc or 0
+        self._mi = mi or 65281  # Default MI, falls None
+        self._objsrc = objsrc or 32700  # Default OBJADR, falls None
         self._logger = logger or logging.getLogger(__name__)
 
         self._reader: Optional[asyncio.StreamReader] = None
@@ -30,19 +30,23 @@ class Net4HomeApi:
 
     def _build_password_packet(self, password: str) -> bytes:
         type8 = N4HIP_PT_PASSWORT_REQ & 0xFF
-        ipsrc = 0
-        ipdest = 0
+        ipsrc = self._mi
+        ipdest = 0  # oft 0 im Client-Paket
         objsrc = self._objsrc
 
         pwd_hash = get_hash_for_server2(password)
         ddatalen = len(pwd_hash)
 
-        packet_without_checksum = struct.pack(
-            "<BHHHB", type8, ipsrc, ipdest, objsrc, ddatalen
-        ) + pwd_hash
+        packet_without_checksum = (
+            struct.pack("<B", type8)
+            + struct.pack("<H", ipsrc)
+            + struct.pack("<H", ipdest)
+            + struct.pack("<H", objsrc)
+            + struct.pack("<B", ddatalen)
+            + pwd_hash
+        )
 
         checksum = sum(packet_without_checksum) % 256
-
         packet = packet_without_checksum + struct.pack("<B", checksum)
         return packet
 
@@ -57,7 +61,6 @@ class Net4HomeApi:
         compressed_packet = compress(packet_bytes)
         self._logger.debug(f"Passwortpaket (komprimiert): {compressed_packet.hex()}")
 
-        # 4-Byte Länge voranstellen (Little-Endian uint32)
         packet_len = len(compressed_packet)
         packet_with_len = struct.pack("<I", packet_len) + compressed_packet
 
@@ -65,42 +68,28 @@ class Net4HomeApi:
         self._logger.debug(f"Gesendetes Paket mit Länge (hex): {packet_with_len[:4].hex()}")
         self._logger.debug(f"Gesendetes Paket komplett (hex): {packet_with_len.hex()}")
 
-        # self._writer.write(packet_with_len)
-        hex_string = "190000000002ac0f400a000002bc02404600000487000000c000000200"
-        packet_bytes = bytes.fromhex(hex_string)
-        self._writer.write(packet_bytes)        
+        self._writer.write(packet_with_len)
         await self._writer.drain()
-        self._logger.debug("Fake Passwortpaket gesendet")
+        self._logger.debug("Passwortpaket gesendet")
 
-        await self._read_packets(self._reader)
+        await self._read_one_packet()
 
-    async def _read_packets(self, reader: asyncio.StreamReader) -> None:
-        while True:
-            try:
-                length_bytes = await reader.readexactly(4)
-            except asyncio.IncompleteReadError:
-                self._logger.warning("Verbindung geschlossen (IncompleteReadError)")
-                break
-
+    async def _read_one_packet(self) -> None:
+        try:
+            length_bytes = await self._reader.readexactly(4)
             payload_len = struct.unpack("<I", length_bytes)[0]
-            self._logger.debug(f"Erwarte Payload mit Länge {payload_len} Bytes")
+            self._logger.debug(f"Erwarte Antwort-Payload mit Länge {payload_len} Bytes")
 
-            try:
-                payload_compressed = await reader.readexactly(payload_len)
-            except asyncio.IncompleteReadError:
-                self._logger.warning("Verbindung geschlossen beim Lesen der Payload")
-                break
-
+            payload_compressed = await self._reader.readexactly(payload_len)
             self._logger.debug(f"Empfangene komprimierte Payload: {payload_compressed.hex()}")
 
-            try:
-                payload = decompress(payload_compressed)
-                self._logger.debug(f"Dekomprimierte Payload: {payload.hex()}")
-            except CompressionError as err:
-                self._logger.error(f"Dekompression fehlgeschlagen: {err}")
-                continue
+            payload = decompress(payload_compressed)
+            self._logger.debug(f"Dekomprimierte Payload: {payload.hex()}")
 
             self._process_packet(payload)
+        except Exception as e:
+            self._logger.error(f"Fehler beim Lesen der Antwort: {e}")
+            raise
 
     def _process_packet(self, packet: bytes) -> None:
         if len(packet) < 8:
@@ -108,7 +97,9 @@ class Net4HomeApi:
             return
 
         type8 = packet[0]
-        ipsrc, ipdest, objsrc = struct.unpack("<HHH", packet[1:7])
+        ipsrc = struct.unpack("<H", packet[1:3])[0]
+        ipdest = struct.unpack("<H", packet[3:5])[0]
+        objsrc = struct.unpack("<H", packet[5:7])[0]
         ddatalen = packet[7]
 
         self._logger.debug(
