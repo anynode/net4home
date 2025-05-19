@@ -55,7 +55,9 @@ class Net4HomeApi:
         packet_bytes = self._build_password_packet(self._password)
         self._logger.debug(f"Passwortpaket (unkomprimiert): {packet_bytes.hex()}")
 
-        compressed_packet = compress(packet_bytes)
+        """compressed_packet = compress(packet_bytes)"""
+        compressed_packet = packet_bytes
+        
         self._logger.debug(f"Passwortpaket (komprimiert): {compressed_packet.hex()}")
 
         self._writer.write(compressed_packet)
