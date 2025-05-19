@@ -67,14 +67,15 @@ class Net4HomeApi:
 
         self._logger.debug(f"Password packet (uncompressed): {packet_bytes.hex()}")
 
-        compressed_packet = compress(packet_bytes)
-
+        """compressed_packet = compress(packet_bytes)"""
+        compressed_packet = packet_bytes
+        
         self._logger.debug(f"Password packet (compressed): {compressed_packet.hex()}")
 
         self._writer.write(compressed_packet)
         await self._writer.drain()
         self._logger.debug("Password packet sent")
-
+    
         compressed_response = await self._reader.read(4096)
         self._logger.debug(f"Received compressed response: {compressed_response.hex()}")
 
