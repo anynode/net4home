@@ -67,6 +67,7 @@ class Net4HomeApi:
 
         """self._writer.write(packet_with_len)"""
         self._writer.write("190000000002ac0f400a000002bc02404600000487000000c000000200")
+        
         await self._writer.drain()
         self._logger.debug("Fake Passwortpaket gesendet")
 
