@@ -84,7 +84,7 @@ def log_parsed_packet(header: bytes, payload: bytes):
     except Exception as ex:
         _LOGGER.error("Fehler beim Paket-Parsing: %s", ex)
 
-class Net4HomeClient:
+class Net4HomeApi:
     def __init__(self, hass, host, port=DEFAULT_PORT, password="", mi=DEFAULT_MI, objadr=DEFAULT_OBJADR):
         self._hass = hass
         self._host = host
@@ -104,8 +104,7 @@ class Net4HomeClient:
         mi_hex = f"{self._mi & 0xFF:02x}{(self._mi >> 8) & 0xFF:02x}"
         objadr_hex = f"{self._objadr & 0xFF:02x}{(self._objadr >> 8) & 0xFF:02x}"
 
-        # Falls Flags/Subtype/Len-Felder nötig sind, passe hier an!
-        # Für viele Busse reicht die folgende Payload-Struktur:
+        # Zusammensetzen des unkomprimierten Payloads
         payload_uncompressed = (
             "ac0f400a"
             + mi_hex
