@@ -29,7 +29,7 @@ class Net4HomeApi:
 
         checksum = sum(packet_without_checksum) % 256
 
-        packet = packet_without_checksum + struct.pack("<B", checksum)^
+        packet = packet_without_checksum + struct.pack("<B", checksum)
         return packet
 
     async def async_connect(self) -> None:

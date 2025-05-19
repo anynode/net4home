@@ -2,6 +2,7 @@ from homeassistant import config_entries
 import voluptuous as vol
 import socket
 import asyncio
+import logging
 
 from .const import DOMAIN, DEFAULT_PORT, DEFAULT_MI, DEFAULT_OBJADR, CONF_MI, CONF_OBJADR
 from .api import Net4HomeApi
@@ -13,13 +14,14 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             client = Net4HomeApi(
-                self.hass,
-                user_input["host"],
-                user_input["port"],
-                user_input["password"],
-                user_input.get(CONF_MI),
-                user_input.get(CONF_OBJADR),
+                host=user_input["host"],
+                port=user_input["port"],
+                password=user_input["password"],
+                mi=user_input.get(CONF_MI),
+                objsrc=user_input.get(CONF_OBJADR),
+                logger=logging.getLogger(__name__)
             )
+            
             try:
                 await client.async_connect()
                 await client.async_disconnect()
