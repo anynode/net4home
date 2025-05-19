@@ -18,8 +18,7 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 port=user_input["port"],
                 password=user_input["password"],
                 mi=user_input.get(CONF_MI),
-                objsrc=user_input.get(CONF_OBJADR),
-                logger=logging.getLogger(__name__)
+                objsrc=user_input.get(CONF_OBJADR)
             )
             
             try:
