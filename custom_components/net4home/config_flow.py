@@ -4,7 +4,7 @@ import socket
 import asyncio
 
 from .const import DOMAIN, DEFAULT_PORT, DEFAULT_MI, DEFAULT_OBJADR, CONF_MI, CONF_OBJADR
-from .api import Net4HomeClient
+from .api import Net4HomeApi
 
 class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
@@ -12,7 +12,7 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         errors = {}
         if user_input is not None:
-            client = Net4HomeClient(
+            client = Net4HomeApi(
                 self.hass,
                 user_input["host"],
                 user_input["port"],
