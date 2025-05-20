@@ -94,6 +94,9 @@ class Net4HomeApi:
 
                 packets = self._packet_receiver.feed_data(data)
 
+                for idx, (ptype, payload) in enumerate(packets, 1):
+                    _LOGGER.debug(f"Packet #{idx}: Type={ptype}, Length={len(payload)}, Payload (hex)={payload.hex()}")
+
                 for ptype, payload in packets:
                     _LOGGER.debug(f"Received packet type={ptype} length={len(payload)}")
                     try:
