@@ -37,7 +37,7 @@ class Net4HomeApi:
         _LOGGER.debug("TCP connection established")
         
         if self._password:
-            packet = self._build_password_packet()
+            packet = self._password
             self._writer.write(packet)
             await self._writer.drain()
             _LOGGER.debug("Password packet sent (hex): %s", packet.hex())
