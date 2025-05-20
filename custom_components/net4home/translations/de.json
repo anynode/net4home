@@ -6,7 +6,7 @@
         "description": "Gib die Verbindungsdaten zum net4home Busconnector ein.",
         "data": {
           "host": "Host",
-          "port": "Port",
+          "port": "Port (3478)",
           "password": "Passwort",
           "MI": "MI",
           "OBJADR": "OBJADR"
@@ -14,7 +14,7 @@
       }
     },
     "error": {
-      "host_not_found": "Host konnte nicht gefunden werden.",
+      "host_not_found": "Der Busconnector konnte nicht gefunden werden.",
       "timeout": "Timeout beim Verbindungsaufbau oder Handshake.",
       "cannot_connect": "Verbindung konnte nicht hergestellt werden.",
       "unknown": "Unbekannter Fehler."
