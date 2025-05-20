@@ -12,24 +12,15 @@ from .n4htools import (
 _LOGGER = logging.getLogger(__name__)
 
 class Net4HomeApi:
-    def __init__(self, hass, host, port=DEFAULT_PORT, password, mi=DEFAULT_MI, objadr=DEFAULT_OBJADR):
+    def __init__(self, hass, host, port=DEFAULT_PORT, password="", mi=DEFAULT_MI, objadr=DEFAULT_OBJADR):
         self._hass = hass
         self._host = host
         self._port = port
-        self._password = password  # used for authentication
+        self._password = password
         self._mi = mi
         self._objadr = objadr
         self._reader = None
         self._writer = None
-
-    def _build_password_packet(self) -> bytes:
-        """Construct the password packet for authentication."""
-        hash_hex = get_hash_for_server2(self._password).hex().upper()
-        packet_hex = (
-            "0008ac0f0000cd564c77400c00002120" + hash_hex +
-            "401b0000080700000087000000c000000aac"
-        )
-        return bytes.fromhex(packet_hex)
 
     async def async_connect(self):
         _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
