@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar net4home",
+        "description": "Introduce los detalles de conexión para el conector de bus de net4home.",
+        "data": {
+          "host": "Host",
+          "port": "Puerto (3478)",
+          "password": "Contraseña",
+          "MI": "MI",
+          "OBJADR": "OBJADR"
+        }
+      }
+    },
+    "error": {
+      "host_not_found": "No se pudo encontrar el conector de bus.",
+      "timeout": "Se agotó el tiempo de conexión o durante el handshake.",
+      "cannot_connect": "No se pudo establecer la conexión.",
+      "unknown": "Error desconocido."
+    }
+  }
+}
