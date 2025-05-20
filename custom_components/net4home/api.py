@@ -26,26 +26,7 @@ class Net4HomeApi:
         _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
         self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
         _LOGGER.debug("TCP connection established")
-
-        # MI/OBJADR als Little Endian (2 bytes je Feld!)
-        mi_hex = f"{self._mi & 0xFF:02x}{(self._mi >> 8) & 0xFF:02x}"
-        objadr_hex = f"{self._objadr & 0xFF:02x}{(self._objadr >> 8) & 0xFF:02x}"
-
-        # Zusammensetzen des unkomprimierten Payloads
-        payload_uncompressed = (
-            "ac0f400a"
-            + mi_hex
-            + "bc024046"
-            + objadr_hex
-            + "04870000"
-            + "00c00000"
-            + "0200"
-        )
-
-        # compressed = n4hbus_compress_section(payload_uncompressed)
-        packet = bytes.fromhex("19000000" + compressed)
         packet = bytes.fromhex("ac0f0000cd564c77400c000021203732363343423543464343333646323630364344423338443945363135394535401b0000080700000087000000c000000aac")
-
         self._writer.write(packet)
         await self._writer.drain()
         _LOGGER.debug("Compressed init packet sent (hex): %s", packet.hex())
