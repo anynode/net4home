@@ -38,9 +38,10 @@ class Net4HomeApi:
         
         if self._password:
             packet = self._password
-            self._writer.write(packet)
+            _LOGGER.debug("Password packet sent before (hex): %s", packet.hex())
+            self._writer.write(packet.hex())
             await self._writer.drain()
-            _LOGGER.debug("Password packet sent (hex): %s", packet.hex())
+            _LOGGER.debug("Password packet sent after (hex): %s", packet.hex())
 
     async def async_disconnect(self):
         _LOGGER.info("Disconnecting from net4home bus")
