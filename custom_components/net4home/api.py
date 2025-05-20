@@ -26,7 +26,8 @@ class Net4HomeApi:
         _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
         self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
         _LOGGER.debug("TCP connection established")
-        packet = bytes.fromhex("ac0f0000cd564c77400c000021203732363343423543464343333646323630364344423338443945363135394535401b0000080700000087000000c000000aac")
+        
+        packet = bytes.fromhex("0008ac0f0000cd564c77400c000021203732363343423543464343333646323630364344423338443945363135394535401b0000080700000087000000c000000aac")
         self._writer.write(packet)
         await self._writer.drain()
         _LOGGER.debug("Compressed init packet sent (hex): %s", packet.hex())
