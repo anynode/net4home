@@ -4,11 +4,8 @@ import struct
 import binascii
 
 from .const import DEFAULT_PORT, DEFAULT_MI, DEFAULT_OBJADR
-from .md5_custom import get_hash_for_server2
-from .n4htools import (
-    n4hbus_decomp_section,
-    log_parsed_packet,
-)
+from .compressor import decompress, CompressionError
+from .n4htools import log_parsed_packet
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -17,20 +14,31 @@ class N4HPacketReceiver:
         self._buffer = bytearray()
 
     def feed_data(self, data: bytes):
+        """Füttert neue Daten in den Puffer und gibt alle vollständigen Pakete zurück.
+
+        Paketaufbau (Little Endian):
+        - 4 Bytes: ptype (int)
+        - 4 Bytes: Länge (int)
+        - Länge Bytes: Payload (komprimiert)
+
+        Rückgabe: Liste von (ptype, payload_bytes)
+        """
         self._buffer.extend(data)
         packets = []
 
         while True:
             if len(self._buffer) < 8:
+                # Header noch nicht vollständig
                 break
 
             try:
                 ptype, length = struct.unpack("<ii", self._buffer[:8])
             except struct.error as e:
-                _LOGGER.error("Error unpacking packet header: %s", e)
+                _LOGGER.error("Fehler beim Entpacken des Headers: %s", e)
                 break
 
             if len(self._buffer) < 8 + length:
+                # Payload noch nicht vollständig
                 break
 
             payload = self._buffer[8:8 + length]
@@ -60,7 +68,7 @@ class Net4HomeApi:
         try:
             packet_bytes = binascii.unhexlify(self._password)
         except binascii.Error as e:
-            _LOGGER.error("Invalid password hex string: %s", e)
+            _LOGGER.error("Ungültiger Hex-String für Passwort: %s", e)
             raise
 
         _LOGGER.debug("Password packet to send (hex): %s", self._password)
@@ -89,12 +97,14 @@ class Net4HomeApi:
                 for ptype, payload in packets:
                     _LOGGER.debug(f"Received packet type={ptype} length={len(payload)}")
                     try:
-                        decompressed = n4hbus_decomp_section(payload.hex(), len(payload))
-                        _LOGGER.debug(f"Decompressed payload: {decompressed}")
-                        log_parsed_packet(struct.pack("<ii", ptype, len(payload)), payload)
-                        # Hier weitere Verarbeitung ergänzen
+                        decompressed = decompress(payload)
+                        _LOGGER.debug(f"Decompressed payload (hex): {decompressed.hex()}")
+                        log_parsed_packet(struct.pack("<ii", ptype, len(payload)), decompressed)
+                        # Hier kann weitere Paketverarbeitung erfolgen
+                    except CompressionError as e:
+                        _LOGGER.error(f"Fehler bei der Dekomprimierung: {e}")
                     except Exception as e:
-                        _LOGGER.error(f"Decompression error: {e}")
+                        _LOGGER.error(f"Unbekannter Fehler bei Paketverarbeitung: {e}")
 
         except Exception as e:
             _LOGGER.error(f"Listener exception: {e}")
