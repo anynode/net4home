@@ -44,7 +44,7 @@ class Net4HomeApi:
 
         compressed = n4hbus_compress_section(payload_uncompressed)
         packet = bytes.fromhex("19000000" + compressed)
-        packet = bytes.fromhex("0008ac0f0000cd564c77400c000021203833393833394536384630433841303241463146424338314443423634303746401b0000080700000087000000c000000aaa")
+        packet = bytes.fromhex("190000000002ac0f400a000002bc02404600000487000000c000000200")
 
         self._writer.write(packet)
         await self._writer.drain()
