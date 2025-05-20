@@ -88,14 +88,12 @@ class Net4HomeApi:
         try:
             while True:
                 data = await self._reader.read(4096)
+                _LOGGER.debug(f"Data received ({len(data)} bytes): {data.hex()}")
                 if not data:
                     _LOGGER.info("Connection closed by remote")
                     break
 
                 packets = self._packet_receiver.feed_data(data)
-
-                for idx, (ptype, payload) in enumerate(packets, 1):
-                    _LOGGER.debug(f"Packet #{idx}: Type={ptype}, Length={len(payload)}, Payload (hex)={payload.hex()}")
 
                 for ptype, payload in packets:
                     _LOGGER.debug(f"Received packet type={ptype} length={len(payload)}")
