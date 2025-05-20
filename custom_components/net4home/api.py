@@ -35,7 +35,6 @@ class Net4HomeApi:
         _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
         self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
         _LOGGER.debug("TCP connection established")
-        
         packet = self._password
         _LOGGER.debug("Password packet sent before (hex): %s", packet.hex())
         self._writer.write(packet.hex())
