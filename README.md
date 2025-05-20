@@ -7,6 +7,7 @@ This repository contains the custom component for integrating net4home devices w
 - Auto-discovery via Zeroconf (`_net4home_iremote._tcp.local.`)
 - Manual configuration (host, port, bus password, MI, OBJADR)
 - Binary sensors (contact, motion, etc.)
+- Localization support in English, German and Spanish
 - (Future) Additional platforms: `sensor`, `switch`, `light`, `climate`, `scene`
 
 ## Installation
