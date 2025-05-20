@@ -12,7 +12,7 @@ from .n4htools import (
 _LOGGER = logging.getLogger(__name__)
 
 class Net4HomeApi:
-    def __init__(self, hass, host, port=DEFAULT_PORT, password="", mi=DEFAULT_MI, objadr=DEFAULT_OBJADR):
+    def __init__(self, hass, host, port=DEFAULT_PORT, password, mi=DEFAULT_MI, objadr=DEFAULT_OBJADR):
         self._hass = hass
         self._host = host
         self._port = port
