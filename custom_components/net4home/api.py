@@ -45,16 +45,9 @@ class Net4HomeApi:
         compressed = n4hbus_compress_section(payload_uncompressed)
         packet = bytes.fromhex("19000000" + compressed)
 
-        _LOGGER.warning("Compressed Init-Paket gesendet (hex): %s", packet.hex())
-        
-        init_hex = "190000000002ac0f400a000002bc02404600000487000000c000000200"
-        init_bytes = bytes.fromhex(init_hex)
-        self._writer.write(init_bytes)
+        self._writer.write(packet)
         await self._writer.drain()
-        _LOGGER .debug("Passwortpaket (fake) gesendet")        
-        
-        # self._writer.write(packet)
-        # await self._writer.drain()
+        _LOGGER.debug("Compressed init packet sent (hex): %s", packet.hex())
 
     async def async_disconnect(self):
         _LOGGER.info("Disconnecting from net4home bus")
