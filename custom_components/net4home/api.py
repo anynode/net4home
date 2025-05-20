@@ -83,34 +83,34 @@ class Net4HomeApi:
             await self._writer.wait_closed()
             _LOGGER.debug("Connection closed")
 
-async def async_listen(self):
-    _LOGGER.info("Starting listener for bus messages")
-    try:
-        while True:
-            data = await self._reader.read(4096)
-            if not data:
-                _LOGGER.info("Connection closed by remote")
-                break
-            _LOGGER.debug(f"Data received ({len(data)} bytes): {data.hex()}")
-
-            packets = self._packet_receiver.feed_data(data)
-
-            for ptype, payload in packets:
-                _LOGGER.debug(f"Received packet type={ptype} length={len(payload)}")
-                try:
-                    if ptype == 4001:  # N4HIP_PT_PAKET
-                        decompressed = decompress(payload)
-                        _LOGGER.debug(f"Decompressed payload (hex): {decompressed.hex()}")
-                        log_parsed_packet(struct.pack("<ii", ptype, len(payload)), decompressed)
-                        # Hier weitere Verarbeitung für Datenpakete
-                    else:
-                        _LOGGER.debug(f"Packet type {ptype} received, no decompression applied")
-                        # Optional: andere Pakettypen verarbeiten oder ignorieren
-                except CompressionError as e:
-                    _LOGGER.error(f"Fehler bei der Dekomprimierung: {e}")
-                except Exception as e:
-                    _LOGGER.error(f"Unbekannter Fehler bei Paketverarbeitung: {e}")
-
-    except Exception as e:
-        _LOGGER.error(f"Listener exception: {e}")
+    async def async_listen(self):
+        _LOGGER.info("Starting listener for bus messages")
+        try:
+            while True:
+                data = await self._reader.read(4096)
+                if not data:
+                    _LOGGER.info("Connection closed by remote")
+                    break
+                _LOGGER.debug(f"Data received ({len(data)} bytes): {data.hex()}")
+    
+                packets = self._packet_receiver.feed_data(data)
+    
+                for ptype, payload in packets:
+                    _LOGGER.debug(f"Received packet type={ptype} length={len(payload)}")
+                    try:
+                        if ptype == 4001:  # N4HIP_PT_PAKET
+                            decompressed = decompress(payload)
+                            _LOGGER.debug(f"Decompressed payload (hex): {decompressed.hex()}")
+                            log_parsed_packet(struct.pack("<ii", ptype, len(payload)), decompressed)
+                            # Hier weitere Verarbeitung für Datenpakete
+                        else:
+                            _LOGGER.debug(f"Packet type {ptype} received, no decompression applied")
+                            # Optional: andere Pakettypen verarbeiten oder ignorieren
+                    except CompressionError as e:
+                        _LOGGER.error(f"Fehler bei der Dekomprimierung: {e}")
+                    except Exception as e:
+                        _LOGGER.error(f"Unbekannter Fehler bei Paketverarbeitung: {e}")
+    
+        except Exception as e:
+            _LOGGER.error(f"Listener exception: {e}")
 
