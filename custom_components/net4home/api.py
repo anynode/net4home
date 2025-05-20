@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import struct
+import binascii
 
 from .const import DEFAULT_PORT, DEFAULT_MI, DEFAULT_OBJADR
 from .md5_custom import get_hash_for_server2
@@ -26,12 +27,18 @@ class Net4HomeApi:
         _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
         self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
         _LOGGER.debug("TCP connection established")
-        packet = self._password
-        _LOGGER.debug("Password packet sent before (hex): %s", packet.hex())
-        self._writer.write(packet.hex())
-        await self._writer.drain()
-        _LOGGER.debug("Password packet sent after (hex): %s", packet.hex())
 
+        try:
+            packet_bytes = binascii.unhexlify(self._password)
+        except binascii.Error as e:
+            _LOGGER.error("Invalid password hex string: %s", e)
+            raise
+
+        _LOGGER.debug("Password packet to send (hex): %s", self._password)
+        self._writer.write(packet_bytes)
+        await self._writer.drain()
+        _LOGGER.debug("Password packet sent")
+        
     async def async_disconnect(self):
         _LOGGER.info("Disconnecting from net4home bus")
         if self._writer:
