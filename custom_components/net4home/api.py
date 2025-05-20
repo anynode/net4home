@@ -12,6 +12,34 @@ from .n4htools import (
 
 _LOGGER = logging.getLogger(__name__)
 
+class N4HPacketReceiver:
+    def __init__(self):
+        self._buffer = bytearray()
+
+    def feed_data(self, data: bytes):
+        self._buffer.extend(data)
+        packets = []
+
+        while True:
+            if len(self._buffer) < 8:
+                break
+
+            try:
+                ptype, length = struct.unpack("<ii", self._buffer[:8])
+            except struct.error as e:
+                _LOGGER.error("Error unpacking packet header: %s", e)
+                break
+
+            if len(self._buffer) < 8 + length:
+                break
+
+            payload = self._buffer[8:8 + length]
+            packets.append((ptype, payload))
+            del self._buffer[:8 + length]
+
+        return packets
+
+
 class Net4HomeApi:
     def __init__(self, hass, host, port=DEFAULT_PORT, password="", mi=DEFAULT_MI, objadr=DEFAULT_OBJADR):
         self._hass = hass
@@ -22,6 +50,7 @@ class Net4HomeApi:
         self._objadr = objadr
         self._reader = None
         self._writer = None
+        self._packet_receiver = N4HPacketReceiver()
 
     async def async_connect(self):
         _LOGGER.info("Connecting to net4home bus at %s:%d", self._host, self._port)
@@ -38,7 +67,7 @@ class Net4HomeApi:
         self._writer.write(packet_bytes)
         await self._writer.drain()
         _LOGGER.debug("Password packet sent")
-        
+
     async def async_disconnect(self):
         _LOGGER.info("Disconnecting from net4home bus")
         if self._writer:
@@ -46,30 +75,26 @@ class Net4HomeApi:
             await self._writer.wait_closed()
             _LOGGER.debug("Connection closed")
 
-    async def receive_packet(self):
-        if not self._reader:
-            raise ConnectionError("Not connected to bus")
-        header = await self._reader.readexactly(8)
-        ptype, length = struct.unpack("<ii", header)
-        payload = await self._reader.readexactly(length)
-        hex_payload = (header + payload).hex()
-        log_parsed_packet(header, payload)
-        _LOGGER.debug(
-            "Empfangenes Paket: typ=%s, len=%s, header+payload (hex): %s",
-            ptype, length, hex_payload
-        )
-        try:
-            decompressed = n4hbus_decomp_section(payload.hex(), len(payload))
-            _LOGGER.debug("Dekomprimierter Payload: %s", decompressed)
-        except Exception as ex:
-            _LOGGER.error("Fehler bei der Dekomprimierung: %s", ex)
-        return ptype, payload
-
     async def async_listen(self):
         _LOGGER.info("Starting listener for bus messages")
-        while True:
-            try:
-                ptype, payload = await self.receive_packet()
-            except Exception as e:
-                _LOGGER.error("Exception in listener loop: %s", e)
-                break
+        try:
+            while True:
+                data = await self._reader.read(4096)
+                if not data:
+                    _LOGGER.info("Connection closed by remote")
+                    break
+
+                packets = self._packet_receiver.feed_data(data)
+
+                for ptype, payload in packets:
+                    _LOGGER.debug(f"Received packet type={ptype} length={len(payload)}")
+                    try:
+                        decompressed = n4hbus_decomp_section(payload.hex(), len(payload))
+                        _LOGGER.debug(f"Decompressed payload: {decompressed}")
+                        log_parsed_packet(struct.pack("<ii", ptype, len(payload)), payload)
+                        # Hier weitere Verarbeitung ergänzen
+                    except Exception as e:
+                        _LOGGER.error(f"Decompression error: {e}")
+
+        except Exception as e:
+            _LOGGER.error(f"Listener exception: {e}")
