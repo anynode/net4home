@@ -1,4 +1,5 @@
 import asyncio
+import asyncio
 import struct
 import logging
 import binascii
@@ -27,7 +28,9 @@ class N4HPacketReceiver:
                 length_bytes[0]
             )
             
-            total_len = (length*2) - 8
+            # total_len = (length*2) - 8
+            total_len = length - 4
+            
             if len(self._buffer) < total_len:
                 break  # Ganzes Paket noch nicht da
                 
@@ -41,10 +44,12 @@ class N4HPacketReceiver:
             
             ptype = struct.unpack('<i', self._buffer[12:16])[0]
 
-            compressed_payload = self._buffer[16:total_len]
+            compressed_payload = self._buffer[16:(total_len*2)]
+            _LOGGER.error(f"compressed_payload: {compressed_payload}")
 
             try:
                 decompressed_payload = decompress(compressed_payload)
+                _LOGGER.error(f"decompressed_payload: {decompressed_payload}")
             except CompressionError as e:
                 _LOGGER.error(f"Dekomprimierungsfehler: {e}")
                 del self._buffer[:total_len]
@@ -61,12 +66,9 @@ class N4HPacketReceiver:
 
 
 def n4hmodule_parse(msg_bytes: bytes):
-    """
-    Entspricht Perl N4HMODULE_Parse: Zerlegt dekomprimierten Payload in Felder.
-    """
-    if len(msg_bytes) < 17:
-        _LOGGER.error("N4HMODULE_Parse: Payload zu kurz")
-        return None
+    #if len(msg_bytes) < 17:
+    #    _LOGGER.error("N4HMODULE_Parse: Payload zu kurz")
+    #    return None
 
     try:
         type8 = msg_bytes[0]
@@ -138,11 +140,13 @@ class Net4HomeApi:
                 packets = self._packet_receiver.feed_data(data)
                 for ptype, payload in packets:
                     _LOGGER.debug(f"Paket empfangen: Typ={ptype}, Länge={len(payload)}")
+                    
                     parse_result = n4hmodule_parse(payload)
                     if parse_result is None:
+                        _LOGGER.warning("Payload konnte nicht geparst werden, überspringe")
                         continue
-                    type8, ipsrc, ipdst, objsrc, ddata = parse_result
 
+                    type8, ipsrc, ipdst, objsrc, ddata = parse_result
                     # Hier kannst du ddata weiterverarbeiten oder an deine Home Assistant States übergeben
                     log_parsed_packet(struct.pack("<ii", ptype, len(payload)), payload)
 

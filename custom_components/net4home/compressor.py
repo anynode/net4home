@@ -1,78 +1,116 @@
 class CompressionError(Exception):
+    """Exception für Fehler bei der Dekompression."""
     pass
 
-def compress(data: bytes) -> bytes:
+
+decompressor_err = 0
+decompressor_errAdr = 0
+
+
+def decompress(data: bytes, use_cs: bool = True, max_out_len: int = 10000) -> bytes:
     """
-    Ein sehr einfacher RLL-Kompressor angelehnt an N4HBUS_CompressSection.
-    Hier als Beispiel: fügt nur die Länge + Daten + Endmarkierung + Prüfsumme an.
-    Für echte Kompression müsste man noch Runs codieren.
+    Entspricht der Pascal-Funktion decompSection.
+    Dekomprimiert Daten mit RLL-ähnlichem Verfahren.
+
+    Args:
+        data: komprimierte Eingabedaten als Bytes
+        use_cs: Prüfsummenprüfung aktivieren (Standard: True)
+        max_out_len: maximale Ausgabelänge (Standard: 10000 Bytes)
+
+    Returns:
+        dekomprimierte Bytes
+
+    Raises:
+        CompressionError bei Dekompressionsfehlern
     """
-    # Länge als 2 Bytes (HighByte, LowByte)
+
+    global decompressor_err, decompressor_errAdr
+
+    decompressor_err = 0
+    decompressor_errAdr = 0
+
+    out = bytearray()
+    cs_calc = 0
+    i = 0
+    ende = False
+    err = False
+
     length = len(data)
-    hi = (length >> 8) & 0xFF
-    lo = length & 0xFF
-    cs = sum(data) & 0xFFFFFFFF
 
-    # Header (Länge)
-    compressed = bytes([hi, lo])
-    compressed += data
-    compressed += b'\xC0'  # Ende-Marker (gemäß Perl-Code)
-    # Prüfsumme als 4 Bytes big endian (wie im Perl-Code)
-    compressed += bytes([
-        (cs >> 24) & 0xFF,
-        (cs >> 16) & 0xFF,
-        (cs >> 8) & 0xFF,
-        cs & 0xFF,
-    ])
-    # Laut Perl wird noch ein Längenbyte + 3 Nullen vorangestellt:
-    total_len = len(compressed)
-    prefix = bytes([total_len]) + b'\x00\x00\x00'
-    return prefix + compressed
+    while i < length and len(out) < max_out_len and not ende and not err:
+        b = data[i]
+        flag = b & 0xC0
 
-def decompress(data: bytes) -> bytes:
-    """
-    Einfacher Dekompressor für die Daten nach dem Perl-Algorithmus.
-    Hier simulieren wir nur die reine Rückgabe der Nutzdaten ohne Runs,
-    da der Perl-Code eine einfache RLL-Variante mit speziellen Bitmasken nutzt.
-    """
+        if flag == 0xC0:
+            # Ende + 4-Byte Prüfsumme
+            if i + 4 >= length:
+                err = True
+                decompressor_err = -3  # Zu kurze Daten für Prüfsumme
+                break
 
-    if len(data) < 7:
-        raise CompressionError("Daten zu kurz für Dekompression")
+            cs_rx = (data[i+1] << 24) | (data[i+2] << 16) | (data[i+3] << 8) | data[i+4]
+            ende = True
+            i += 5
 
-    # Laut Perl wird das erste Byte als Länge genutzt (prefix)
-    len_prefix = data[0]
-    # Die nächsten 3 Bytes sind Nullen (Padding)
-    # Danach folgt der komprimierte Datenblock
+            if use_cs and cs_rx != cs_calc:
+                err = True
+                decompressor_err = -100
+                decompressor_errAdr = cs_rx - cs_calc
+                break
 
-    # Einfachheitshalber ignorieren wir hier die echte RLL-Dekompression und
-    # extrahieren den Block anhand der Länge
+        elif flag == 0x00:
+            # Unkomprimierter Block (Store)
+            if i + 1 >= length:
+                err = True
+                decompressor_err = -3
+                break
+            in_block = (data[i] << 8) | data[i+1]
+            i += 2
 
-    compressed_section = data[4:]  # Nach prefix + 3 Nullen
+            if i + in_block > length:
+                err = True
+                decompressor_err = -4
+                break
 
-    # Nun interpretieren wir die 2 Bytes Länge als Länge der unkomprimierten Daten
-    if len(compressed_section) < 2:
-        raise CompressionError("Kein Längenfeld im komprimierten Block")
+            for _ in range(in_block):
+                val = data[i]
+                out.append(val)
+                cs_calc = (cs_calc + val) & 0xFFFFFFFF
+                i += 1
 
-    length_hi = compressed_section[0]
-    length_lo = compressed_section[1]
-    uncompressed_len = (length_hi << 8) + length_lo
+        elif flag == 0x40:
+            # Komprimierter Block (CopyChar)
+            if i + 2 >= length:
+                err = True
+                decompressor_err = -3
+                break
 
-    # Datenbereich ohne Header + Prüfsumme + Endmarker
-    # Endmarker 0xC0, Prüfsumme 4 Bytes am Ende
-    # Daten liegen zwischen Byte 2 und (len-5)
+            in_block = ((data[i] << 8) | data[i+1]) & 0x3FFF  # 14 bit Länge
+            val = data[i+2]
+            i += 3
 
-    data_start = 2
-    data_end = len(compressed_section) - 5  # 1 Endmarker + 4 Prüfsumme
+            for _ in range(in_block):
+                out.append(val)
+                cs_calc = (cs_calc + val) & 0xFFFFFFFF
 
-    if data_end < data_start:
-        raise CompressionError("Ungültige komprimierte Datenlänge")
+        elif flag == 0x80:
+            # Fehler
+            err = True
+            decompressor_err = -2
+            i += 1
 
-    # Extrahiere Datenblock (unkomprimiert, da wir keine Runs verarbeiten)
-    decompressed = compressed_section[data_start:data_end]
+        else:
+            # Unerwartetes Flag (sollte nicht passieren)
+            err = True
+            decompressor_err = -1
+            i += 1
 
-    if len(decompressed) != uncompressed_len:
-        # Warnung, da Länge nicht passt
-        # In der echten Dekompression würde man hier Runs expandieren
-        pass
+        decompressor_errAdr = i
 
-    return decompressed
+    if err or not ende:
+        raise CompressionError(f"Dekompressionsfehler {decompressor_err} bei Position {decompressor_errAdr}")
+
+    if len(out) > max_out_len:
+        raise CompressionError(f"Dekomprimierte Daten zu lang ({len(out)} Bytes, max {max_out_len})")
+
+    return bytes(out)
