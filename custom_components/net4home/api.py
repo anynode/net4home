@@ -10,10 +10,13 @@ from .n4htools import log_parsed_packet  # Deine existierende Funktion zur Paket
 
 _LOGGER = logging.getLogger(__name__)
 
+N4HIP_PT_PAKET = 4001
+N4HIP_PT_PASSWORT_REQ = 4012
+N4HIP_PT_OOB_DATA_RAW = 4010
+
 class N4HPacketReceiver:
     def __init__(self):
         self._buffer = bytearray()
-        self._marker = b'\xa1\x0f'  # Marker a10f
  
     def feed_data(self, data: bytes):
         self._buffer.extend(data)
@@ -24,12 +27,7 @@ class N4HPacketReceiver:
                 break  # Länge noch nicht da
 
             length_bytes = self._buffer[:2]
-            length = (
-                length_bytes[0]
-            )
-            
-            # total_len = (length*2) - 8
-            total_len = length - 4
+            total_len = length_bytes[0] - 4
             
             if len(self._buffer) < total_len:
                 break  # Ganzes Paket noch nicht da
@@ -41,24 +39,17 @@ class N4HPacketReceiver:
 
             # Die ersten 8 Bytes nach Länge sind unkomprimiert (Header)
             header = self._buffer[2:12]
-            
             ptype = struct.unpack('<i', self._buffer[12:16])[0]
-
-            compressed_payload = self._buffer[16:(total_len*2)]
-            _LOGGER.error(f"compressed_payload: {compressed_payload}")
-
-            try:
-                decompressed_payload = decompress(compressed_payload)
-                _LOGGER.error(f"decompressed_payload: {decompressed_payload}")
-            except CompressionError as e:
-                _LOGGER.error(f"Dekomprimierungsfehler: {e}")
-                del self._buffer[:total_len]
-                continue
-
-            full_payload = decompressed_payload
-            _LOGGER.debug(f"full_payload: {full_payload.hex()}")            
-            packets.append((ptype, full_payload))
-
+            
+            # Wir verarbeiten hier nur N4HIP_PT_PAKET Daten
+            if ptype == N4HIP_PT_PAKET:
+                payload = self._buffer[16:length]
+                _LOGGER.debug(f"Pakettyp: {ptype}")
+                _LOGGER.debug(f"Payload: {payload.hex()}")
+                packets.append((ptype, payload))
+            else:
+                _LOGGER.debug(f"Nicht verarbeiteter Pakettyp: {ptype}")
+            
             del self._buffer[:total_len]
 
         return packets
