@@ -3,60 +3,6 @@ import logging
 _LOGGER = logging.getLogger(__name__)
 
 
-def n4hbus_compress_section(p_uncompressed: str) -> str:
-    cs = sum(int(p_uncompressed[i*2:i*2+2], 16) for i in range(len(p_uncompressed)//2))
-    length = len(p_uncompressed) // 2
-    hi = length >> 8
-    lo = length & 0xFF
-    p_compressed = f"{hi:02X}{lo:02X}"
-    p = 0
-    while p < length:
-        p_compressed += p_uncompressed[p*2:p*2+2]
-        p += 1
-    p_compressed += "C0"
-    p_compressed += f"{(cs>>24)&0xFF:02X}{(cs>>16)&0xFF:02X}{(cs>>8)&0xFF:02X}{cs&0xFF:02X}"
-    plen = len(p_compressed) // 2
-    p_compressed = f"{plen:02X}000000" + p_compressed
-    return p_compressed
-
-
-def n4hbus_decomp_section(p2: str, fs: int) -> str:
-    ret = ''
-    zaehler = 0
-    ende = False
-    err = False
-    gPout = ''
-    maxoutlen = 372
-    while (zaehler < fs) and (len(gPout) < maxoutlen*2) and not ende and not err:
-        bb = p2[zaehler*2:zaehler*2+2]
-        bbval = int(bb, 16)
-        if (bbval & 192) == 192:
-            ende = True
-            zaehler += 1
-        elif (bbval & 192) == 0:
-            bc = p2[(zaehler+1)*2:(zaehler+1)*2+2]
-            inBlock = (int(bb, 16) << 8) + int(bc, 16)
-            zaehler += 2
-            while inBlock > 0:
-                gPout += p2[zaehler*2:zaehler*2+2]
-                zaehler += 1
-                inBlock -= 1
-        elif (bbval & 192) == 64:
-            bc = p2[(zaehler+1)*2:(zaehler+1)*2+2]
-            inBlock = ((int(bb, 16) << 8) + int(bc, 16)) & 16383
-            bbval_next = p2[(zaehler+2)*2:(zaehler+2)*2+2]
-            zaehler += 3
-            while inBlock > 0:
-                gPout += bbval_next
-                inBlock -= 1
-        elif (bbval & 0xC0) == 0x80:
-            err = True
-            zaehler += 1
-    if (not err) and ende:
-        ret = gPout
-    return ret
-
-
 def log_parsed_packet(header: bytes, payload: bytes):
     """Log a parsed packet in a human readable form."""
     try:
@@ -82,3 +28,64 @@ def log_parsed_packet(header: bytes, payload: bytes):
         _LOGGER.info(logstr)
     except Exception as ex:
         _LOGGER.error("Fehler beim Paket-Parsing: %s", ex)
+
+def adr_to_text_obj_grp(padr: bytes) -> str:
+    """
+    Entspricht Pascal AdrToTextOBJ_GRP(padr: pbyte).
+    padr: bytes-Objekt mit mindestens 2 Bytes.
+    Liest zwei Bytes, kombiniert zu einem Wort (word = 16 Bit),
+    prüft oberstes Bit und gibt 'GRP N' oder 'OBJ N' zurück.
+    """
+    if len(padr) < 2:
+        raise ValueError("padr muss mindestens 2 Bytes lang sein")
+    adr = padr[0] * 256 + padr[1]
+    if adr & 0x8000 == 0x8000:
+        return f"GRP {adr - 0x8000}"
+    else:
+        return f"OBJ {adr}"
+
+def adr_to_text(adr: int) -> str:
+    """
+    Entspricht Pascal AdrToText(adr: word).
+    Wenn höchstes Bit gesetzt, 'G'+Zahl, sonst nur Zahl.
+    """
+    if adr & 0x8000 == 0x8000:
+        return f"G{adr - 0x8000}"
+    else:
+        return str(adr)
+
+def adr_to_text_gruppe(adr: int) -> str:
+    """
+    Entspricht Pascal AdrToTextGruppe(adr: word).
+    Gibt nur die unteren 15 Bits als Dezimalzahl zurück.
+    """
+    return str(adr & 0x7FFF)
+
+def text_to_adr(s: str) -> int:
+    """
+    Entspricht Pascal TextToAdr(s: string).
+    Prüft auf 'G' oder 'g' am Anfang, entfernt alle Buchstaben vorne,
+    konvertiert Rest zu Zahl und addiert 0x8000 falls 'G' gesetzt war.
+    """
+    adr = 0x8000 if ('G' in s.upper()) else 0
+    # Alle führenden Nicht-Ziffern entfernen
+    while len(s) > 0 and not s[0].isdigit():
+        s = s[1:]
+    try:
+        value = int(s)
+    except ValueError:
+        value = 0
+    return adr + value
+
+def text_to_adr_gruppe(s: str) -> int:
+    """
+    Entspricht Pascal TextToAdrGruppe(s: string).
+    Entfernt führende Nicht-Ziffern und gibt Zahl mit gesetztem 0x8000 zurück.
+    """
+    while len(s) > 0 and not s[0].isdigit():
+        s = s[1:]
+    try:
+        value = int(s)
+    except ValueError:
+        value = 0
+    return value | 0x8000

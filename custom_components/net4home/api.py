@@ -6,7 +6,7 @@ import binascii
 
 from .const import DEFAULT_PORT, DEFAULT_MI, DEFAULT_OBJADR
 from .compressor import decompress, CompressionError
-from .n4htools import log_parsed_packet  # Deine existierende Funktion zur Paketverarbeitung
+from .n4htools import log_parsed_packet, adr_to_text_obj_grp 
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,12 +21,14 @@ class N4HPacketReceiver:
     def feed_data(self, data: bytes):
         self._buffer.extend(data)
         packets = []
-
+        # 19 0000000002 ac0f 400a000002bc02404600000487000000c000000200
+        # Len 25 - total len 21 - 
+        
         while True:
             if len(self._buffer) < 2:
                 break  # Länge noch nicht da
 
-            length_bytes = self._buffer[:2]
+            length_bytes = self._buffer[:1]
             total_len = length_bytes[0] - 4
             
             if len(self._buffer) < total_len:
@@ -36,52 +38,86 @@ class N4HPacketReceiver:
             #   
             #  1    2    2  1    2 39
             #
-
+            # 30 0000 0000 05 a10f 000004400500001c8102ff7fc96d056505060dd54d617263656c20476f6572747a6b6175403000c000000b72
+            
             # Die ersten 8 Bytes nach Länge sind unkomprimiert (Header)
-            header = self._buffer[2:12]
-            ptype = struct.unpack('<i', self._buffer[12:16])[0]
+            _LOGGER.debug(f"Len:     {total_len}")
+            header = self._buffer[2:6]
+            ptype = struct.unpack('<h', self._buffer[6:8])[0]
+            _LOGGER.debug(f"Header:  {self._buffer[2:6].hex()}")
+            _LOGGER.debug(f"PType:   {self._buffer[6:8].hex()}")
+            _LOGGER.debug(f"Payload: {self._buffer[8:total_len].hex()}")
             
             # Wir verarbeiten hier nur N4HIP_PT_PAKET Daten
             if ptype == N4HIP_PT_PAKET:
-                payload = self._buffer[16:length]
+                payload = self._buffer[8:total_len]
                 _LOGGER.debug(f"Pakettyp: {ptype}")
-                _LOGGER.debug(f"Payload: {payload.hex()}")
+                _LOGGER.debug(f"Payload:  {payload.hex()}")
                 packets.append((ptype, payload))
             else:
                 _LOGGER.debug(f"Nicht verarbeiteter Pakettyp: {ptype}")
             
-            del self._buffer[:total_len]
+            del self._buffer[:total_len + 8]
 
         return packets
 
 
+def n4h_parse(payload_bytes: bytes) -> tuple[str, int, int, int]:
+    """
+    Parsen des N4H-Payloads (als Bytes).
+    Gibt zurück:
+      - lesbaren String mit den Feldern,
+      - ipsrc (int),
+      - ipdst (int),
+      - objsrc (int).
+    Erwartet nur den Payload ab 'ip'-Feld (entspricht original Offset 20).
+    """
+    payload = payload_bytes.hex()
+    ret = ""
 
-def n4hmodule_parse(msg_bytes: bytes):
-    #if len(msg_bytes) < 17:
-    #    _LOGGER.error("N4HMODULE_Parse: Payload zu kurz")
-    #    return None
+    if len(payload) < 40:
+        return ("Payload zu kurz für Parsing", 0, 0, 0)
 
-    try:
-        type8 = msg_bytes[0]
-        ipsrc = int.from_bytes(msg_bytes[2:4], 'little')
-        ipdst = int.from_bytes(msg_bytes[6:8], 'little')
-        objsrc = int.from_bytes(msg_bytes[10:12], 'little')
-        datalen = msg_bytes[14]
+    ip = int(payload[2:4] + payload[0:2], 16)
+    ret += f"IP={ip}\t"
 
-        if len(msg_bytes) < 16 + datalen:
-            _LOGGER.error("N4HMODULE_Parse: Payload unvollständig laut Länge")
-            return None
+    unknown = payload[4:16]
+    ret += f"({unknown})\t"
 
-        ddata = msg_bytes[16:16 + datalen]
+    type8 = int(payload[16:18], 16)
+    ret += f"type8={type8}\t"
 
-        _LOGGER.debug(f"N4HMODULE_Parse: type8={type8}, ipsrc={ipsrc}, ipdst={ipdst}, "
-                      f"objsrc={objsrc}, datalen={datalen}, ddata={ddata.hex()}")
+    # MI = ipsrc
+    mi_str = payload[18:20] + payload[16:18]
+    ipsrc = int(mi_str, 16)
+    ret += f"MI={mi_str}\t"
 
-        return (type8, ipsrc, ipdst, objsrc, ddata)
+    ipdst = int(payload[22:24] + payload[20:22], 16)
+    ret += f"ipdst={ipdst}\t"
 
-    except Exception as e:
-        _LOGGER.error(f"N4HMODULE_Parse: Fehler beim Parsen: {e}")
-        return None
+    objsrc = int(payload[26:28] + payload[24:26], 16)
+    ret += f"objsrc={objsrc}\t"
+
+    datalen = int(payload[28:30], 16)
+    ret += f"datalen={datalen}\t"
+
+    ddata_end = 30 + datalen * 2
+    if len(payload) < ddata_end + 8:
+        return ("Payload zu kurz für ddata und Checkbytes", ipsrc, ipdst, objsrc)
+
+    ddata = payload[30:ddata_end]
+    ret += f"ddata={ddata}\t"
+
+    pos = ddata_end
+
+    csRX = int(payload[pos:pos+2], 16)
+    csCalc = int(payload[pos+2:pos+4], 16)
+    length = int(payload[pos+4:pos+6], 16)
+    posb = int(payload[pos+6:pos+8], 16)
+    ret += f"({csRX}/{csCalc}/{length}/{posb})"
+
+    _LOGGER.debug(f"n4h_parse output: {ret}")
+    return ret, ipsrc, ipdst, objsrc
 
 class Net4HomeApi:
     def __init__(self, hass, host, port=DEFAULT_PORT, password="", mi=DEFAULT_MI, objadr=DEFAULT_OBJADR):
@@ -131,15 +167,17 @@ class Net4HomeApi:
                 packets = self._packet_receiver.feed_data(data)
                 for ptype, payload in packets:
                     _LOGGER.debug(f"Paket empfangen: Typ={ptype}, Länge={len(payload)}")
+                    # parse_result = n4h_parse(payload) 
+                    parse_result, ipsrc, ipdst, objsrc = n4h_parse(payload)
+                    _LOGGER.warning(f" -> {adr_to_text_obj_grp(ipdst)}")
                     
-                    parse_result = n4hmodule_parse(payload)
                     if parse_result is None:
                         _LOGGER.warning("Payload konnte nicht geparst werden, überspringe")
                         continue
 
-                    type8, ipsrc, ipdst, objsrc, ddata = parse_result
+                    # type8, ipsrc, ipdst, objsrc, ddata = parse_result
                     # Hier kannst du ddata weiterverarbeiten oder an deine Home Assistant States übergeben
-                    log_parsed_packet(struct.pack("<ii", ptype, len(payload)), payload)
+                    # log_parsed_packet(struct.pack("<ii", ptype, len(payload)), payload)
 
         except Exception as e:
             _LOGGER.error(f"Fehler im Listener: {e}")
