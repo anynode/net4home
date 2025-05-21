@@ -24,6 +24,11 @@ class N4HPacketReceiver:
         Rückgabe: Liste von (ptype, payload_bytes)
         """
         self._buffer.extend(data)
+
+        # Wenn mindestens 6 Bytes im Puffer sind, diese ignorieren (entfernen)
+        if len(self._buffer) >= 6:
+            del self._buffer[:6]
+
         packets = []
 
         while True:
@@ -46,6 +51,7 @@ class N4HPacketReceiver:
             del self._buffer[:8 + length]
 
         return packets
+
 
 
 class Net4HomeApi:
