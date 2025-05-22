@@ -4,7 +4,7 @@ import socket
 import asyncio
 import logging
 
-from .const import DOMAIN, DEFAULT_PORT, DEFAULT_MI, DEFAULT_OBJADR, CONF_MI, CONF_OBJADR
+from .const import DOMAIN, N4H_IP_PORT, DEFAULT_MI, DEFAULT_OBJADR, CONF_MI, CONF_OBJADR
 from .api import Net4HomeApi
 
 class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
@@ -41,7 +41,7 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema({
             vol.Required("host"): str,
-            vol.Required("port", default=DEFAULT_PORT): int,
+            vol.Required("port", default=N4H_IP_PORT): int,
             vol.Required("password"): str,
             vol.Optional(CONF_MI, default=DEFAULT_MI): int,
             vol.Optional(CONF_OBJADR, default=DEFAULT_OBJADR): int,
