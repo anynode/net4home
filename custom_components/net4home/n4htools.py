@@ -383,7 +383,7 @@ def interpret_n4h_sFkt(paket) -> str:
     elif b0 == D0_VALUE_ACK:
         sFkt += "D0_VALUE_ACK"
         sFkt += " " + decode_and_print_value_ack(paket.ddata)
-    elif b0 == D0_VALUE_REQ:
+    elif b0 == D0_ACK_TYP:
         sFkt += "D0_ACK_TYP "
         sFkt += " " + platine_typ_to_name_a(paket.ddata[1])
     elif b0 == D0_VALUE_REQ:
