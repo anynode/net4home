@@ -20,4 +20,20 @@
       "unknown": "Unbekannter Fehler."
     }
   }
+  ,
+  "options": {
+    "step": {
+      "init": {
+        "title": "net4home konfigurieren",
+        "description": "Aktualisiere die Verbindungsdaten zum net4home Busconnector.",
+        "data": {
+          "host": "Host",
+          "port": "Port (3478)",
+          "password": "Passwort",
+          "MI": "MI",
+          "OBJADR": "OBJADR"
+        }
+      }
+    }
+  }
 }

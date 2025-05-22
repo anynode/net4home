@@ -20,4 +20,20 @@
       "unknown": "Error desconocido."
     }
   }
+  ,
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configurar net4home",
+        "description": "Actualiza los detalles de conexión para el conector de bus de net4home.",
+        "data": {
+          "host": "Host",
+          "port": "Puerto (3478)",
+          "password": "Contraseña",
+          "MI": "MI",
+          "OBJADR": "OBJADR"
+        }
+      }
+    }
+  }
 }
