@@ -22,11 +22,15 @@ class Net4HomeDevice:
 class Net4HomeHub:
     """Manage a connection to a net4home server."""
 
-    def __init__(self, hass, host, port, password, mi, objadr, entry_id: str, modules=None):
+    def __init__(self, hass, host, port, password, mi, objadr, entry_id: str, devices=None):
         self.hass = hass
         self.entry_id = entry_id
         self.api = Net4HomeApi(hass, host, port, password, mi, objadr)
         self.devices: Dict[str, Net4HomeDevice] = {}
+
+        # Pre-register manually configured devices
+        for dev in devices or []:
+            self.register_device(str(dev.get("mi")), dev.get("module_type", ""))
 
     async def async_start(self):
         """Connect to the server and start listening."""

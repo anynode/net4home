@@ -17,6 +17,7 @@ The `net4home` integration allows connections to more than one Bus connector. Fo
 - Binary sensors (contact, motion, etc.)
 - Localization support in English, German and Spanish
 - Add modules via the options flow (module type, software version, EE text and MI)
+- Add devices via the options flow (MI and module type)
 
 ## Installation
 
