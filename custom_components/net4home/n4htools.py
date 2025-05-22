@@ -361,13 +361,13 @@ def interpret_n4h_sFkt(paket) -> str:
         return sFkt
 
     # Statusflags aus type8
-    if paket.type8 & saCYCLIC:
-        pnr = (paket.type8 & saPNR_MASK) >> 4
-        sFkt += f"CY{pnr} "
+    #if paket.type8 & saCYCLIC:
+    #    pnr = (paket.type8 & saPNR_MASK) >> 4
+    #    sFkt += f"CY{pnr} "
 
-    if paket.type8 & saACK_REQ:
-        pnr = (paket.type8 & saPNR_MASK) >> 4
-        sFkt += f"AR{pnr} "
+    #if paket.type8 & saACK_REQ:
+    #    pnr = (paket.type8 & saPNR_MASK) >> 4
+    #    sFkt += f"AR{pnr} "
 
     b0 = paket.ddata[0]
 
@@ -395,8 +395,11 @@ def interpret_n4h_sFkt(paket) -> str:
         sFkt += "D0_TOGGLE"
     elif b0 == D0_REQ:
         sFkt += "D0_REQ"
+    elif b0 == D0_SET_IP:
+        sFkt += "D0_SET_IP"
     elif b0 == D0_SET:
-        sFkt += f"D0_SET, {paket.ddata[1]},{paket.ddata[2]}"
+        # sFkt += f"D0_SET, {paket.ddata[1]},{paket.ddata[2]}"
+        sFkt += f"D0_SET, {paket.ddata[1]},"
     elif b0 == D0_INC:
         sFkt += "D0_INC"
     elif b0 == D0_DEC:
