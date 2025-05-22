@@ -31,7 +31,11 @@
           "port": "Port (3478)",
           "password": "Passwort",
           "MI": "MI",
-          "OBJADR": "OBJADR"
+          "OBJADR": "OBJADR",
+          "module_type": "Modultyp",
+          "software_version": "Software-Version",
+          "ee_text": "EE-Text",
+          "module_mi": "Modul-MI"
         }
       }
     }
