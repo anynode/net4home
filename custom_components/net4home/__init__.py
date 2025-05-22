@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .api import Net4HomeApi
+from .hub import Net4HomeHub
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,19 +23,18 @@ async def async_setup_entry(
 ) -> bool:
     _LOGGER.debug("async_setup_entry called for net4home, entry: %s", entry)
     try:
-        client = Net4HomeApi(
+        hub = Net4HomeHub(
             hass,
             entry.data["host"],
             entry.data["port"],
             entry.data["password"],
             entry.data.get("MI"),
             entry.data.get("OBJADR"),
+            entry.entry_id,
         )
-        _LOGGER.debug("Net4HomeApi created")
-        await client.async_connect()
-        _LOGGER.debug("Net4HomeApi connected")
-        hass.data[DOMAIN][entry.entry_id] = client
-        hass.loop.create_task(client.async_listen())
+        _LOGGER.debug("Net4HomeHub created")
+        await hub.async_start()
+        hass.data[DOMAIN][entry.entry_id] = hub
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         _LOGGER.info("async_setup_entry for net4home finished")
         return True
@@ -57,6 +56,6 @@ async def async_unload_entry(
         )
     )
     if unload_ok:
-        client = hass.data[DOMAIN].pop(entry.entry_id)
-        await client.async_disconnect()
+        hub = hass.data[DOMAIN].pop(entry.entry_id)
+        await hub.async_stop()
     return unload_ok

@@ -7,6 +7,7 @@ The net4home integration for Home Assistant allows you to connect to net4home ha
 ## Prerequisites 
 
 The integration requires one net4home Bus connector.
+Each connection to a Bus connector is represented in Home Assistant as a **hub** device. After the hub is connected, net4home modules will appear as child devices. Entities are created based on the reported device type.
 The `net4home` integration allows connections to more than one Bus connector. For each connector, a new integration entry needs to be created.
 
 ## Features
