@@ -1,5 +1,6 @@
 import logging
 from typing import NamedTuple
+from typing import Dict
 from .const import (
     D0_SET_IP,
     D0_ENUM_ALL,
@@ -107,6 +108,89 @@ from .const import (
     VAL_IS_MIN_TAG_WORD_SA,
     VAL_IS_MIN_TAG_WORD_SU,
     IN_HW_NR_IS_RF_TAG_READER,
+    PLATINE_HW_IS_S8,
+    PLATINE_HW_IS_I4O2,
+    PLATINE_HW_IS_S4AD1,
+    PLATINE_HW_IS_AR8_500,
+    PLATINE_HW_IS_AJ1g,
+    PLATINE_HW_IS_I4J1,
+    PLATINE_HW_IS_LICHT_S1,
+    PLATINE_HW_IS_HS_TIME,
+    PLATINE_HW_IS_I4J2_SS,
+    PLATINE_HW_IS_I4O4_SS,
+    PLATINE_HW_IS_I2_PIR,
+    PLATINE_HW_IS_UP_RF_S4,
+    PLATINE_HW_IS_IRRX,
+    PLATINE_HW_IS_AR_6_12_SS,
+    PLATINE_HW_IS_AJ_3_6_SS,
+    PLATINE_HW_IS_D4_AN,
+    PLATINE_HW_IS_LCD4x16,
+    PLATINE_HW_IS_AJ4_500,
+    PLATINE_HW_IS_S32A32,
+    PLATINE_HW_IS_TLH,
+    PLATINE_HW_IS_LCD4x16M,
+    PLATINE_HW_IS_D4_AB,
+    PLATINE_HW_IS_ARING1,
+    PLATINE_HW_IS_S1A1_WASSER_SUMMER,
+    PLATINE_HW_IS_S4,
+    PLATINE_HW_IS_UP_GL,
+    PLATINE_HW_IS_POWER1,
+    PLATINE_HW_IS_ALARM1,
+    PLATINE_HW_IS_IR_TX_ALL,
+    PLATINE_HW_IS_PROUTE1,
+    PLATINE_HW_IS_LED_2X7,
+    PLATINE_HW_IS_EXT_LD,
+    PLATINE_HW_IS_AD3e,
+    PLATINE_HW_IS_AD3,
+    PLATINE_HW_IS_AR6,
+    PLATINE_HW_IS_AJ3,
+    PLATINE_HW_IS_AT8,
+    PLATINE_HW_IS_UP_RF,
+    PLATINE_HW_IS_AD110,
+    PLATINE_HW_IS_UP_SI,
+    PLATINE_HW_IS_A32,
+    PLATINE_HW_IS_VI4,
+    PLATINE_HW_IS_HS_JAL,
+    PLATINE_HW_IS_VNC,
+    PLATINE_HW_IS_HS_STe8,
+    PLATINE_HW_IS_HS_TCONTROL,
+    PLATINE_HW_IS_GSM,
+    PLATINE_HW_IS_LCD3,
+    PLATINE_HW_IS_HS_CLIMATE,
+    PLATINE_HW_IS_HS_ACCESS,
+    PLATINE_HW_IS_19_AMP4,
+    PLATINE_HW_IS_DALI,
+    PLATINE_HW_IS_EXT_AQV,
+    PLATINE_HW_IS_LCD320C,
+    PLATINE_HW_IS_ACCESS2_LCD,
+    PLATINE_HW_IS_BELL2,
+    PLATINE_HW_IS_ACCESS2_MAIN,
+    PLATINE_HW_IS_VI_8X8,
+    PLATINE_HW_IS_AU_4X4,
+    PLATINE_HW_IS_HS_COUNTER,
+    PLATINE_HW_IS_HS_WL,
+    PLATINE_HW_IS_EXT_AQV_PW,
+    PLATINE_HW_IS_HS_SI6,
+    PLATINE_HW_IS_S3,
+    PLATINE_HW_IS_AR2,
+    PLATINE_HW_IS_AT2E,
+    PLATINE_HW_IS_AJ1,
+    PLATINE_HW_IS_EXT_CBE,
+    PLATINE_HW_IS_UP_BUZZER1,
+    PLATINE_HW_IS_S4PLUS,
+    PLATINE_HW_IS_HSAnalog4,
+    PLATINE_HW_IS_HS_WZ,
+    PLATINE_HW_IS_HFRXT,
+    PLATINE_HW_IS_HS_BARO,
+    PLATINE_HW_IS_EXT_CODESCHLOSS,
+    PLATINE_HW_IS_HFRX,
+    PLATINE_HW_IS_UP_T,
+    PLATINE_HW_IS_UP_RF2,
+    PLATINE_HW_IS_HFRX_ELV868,
+    PLATINE_HW_IS_IR_TX16,
+    PLATINE_HW_IS_S32,
+    PLATINE_HW_IS_PC_SOFTWARE,
+    PLATINE_HW_IS_VIRTUAL_BASE,
 )
 
     
@@ -299,6 +383,9 @@ def interpret_n4h_sFkt(paket) -> str:
     elif b0 == D0_VALUE_ACK:
         sFkt += "D0_VALUE_ACK"
         sFkt += " " + decode_and_print_value_ack(paket.ddata)
+    elif b0 == D0_VALUE_REQ:
+        sFkt += "D0_ACK_TYP "
+        sFkt += " " + platine_typ_to_name_a(paket.ddata[1])
     elif b0 == D0_VALUE_REQ:
         sFkt += "D0_VALUE_REQ"
     elif b0 == D0_STATUS_INFO:
@@ -533,3 +620,102 @@ def decode_and_print_value_ack(paket: bytes) -> str:
         g_analog_value = analog_value
 
     return s
+
+
+def platine_typ_to_name_a(b: int) -> str:
+    """Convert platine hardware type byte to human-readable name."""
+    mapping: Dict[int, str] = {
+        PLATINE_HW_IS_PC_SOFTWARE: 'PC-Software',
+        PLATINE_HW_IS_S8: 'UP-S8',
+        PLATINE_HW_IS_I4O2: 'S4A2',
+        PLATINE_HW_IS_S4AD1: 'S4AD1',
+        PLATINE_HW_IS_S4PLUS: 'UP-S4+',
+        PLATINE_HW_IS_HSAnalog4: 'HS-SAnalog4',
+        PLATINE_HW_IS_AJ1g: 'EXT-AJ1g',
+        PLATINE_HW_IS_I4J1: 'UP-S4AJ1',
+        PLATINE_HW_IS_LICHT_S1: 'SL1',
+        PLATINE_HW_IS_I4J2_SS: 'HS-S4AJ2',
+        PLATINE_HW_IS_I4O4_SS: 'HS-S4AR4',
+        PLATINE_HW_IS_UP_RF_S4: 'UP-RF-S4AR1',
+        PLATINE_HW_IS_AR_6_12_SS: 'HS-AR6-12',
+        PLATINE_HW_IS_AJ_3_6_SS: 'HS-AJ3-6',
+        PLATINE_HW_IS_LCD4x16: 'LCD-4x16',
+        # PLATINE_HW_IS_LCD320C: 'LCD320c',  # commented in original
+
+        PLATINE_HW_IS_S4: 'UP-S4',
+        PLATINE_HW_IS_AR8_500: 'HS-AR8-500',
+        PLATINE_HW_IS_AR2: 'UP-AR2',
+        PLATINE_HW_IS_AT2E: 'UP-AT2e',
+        PLATINE_HW_IS_AJ1: 'UP-AJ1',
+        PLATINE_HW_IS_EXT_CBE: 'EXT-CBE',
+        PLATINE_HW_IS_UP_BUZZER1: 'UP-Buzzer',
+        PLATINE_HW_IS_HS_WZ: 'HS-WZ',
+        PLATINE_HW_IS_HFRXT: 'UP-HFRX-T',
+
+        PLATINE_HW_IS_HFRX_ELV868: 'UP-HFRX-868',
+
+        PLATINE_HW_IS_HS_BARO: 'HS-Baro',
+        PLATINE_HW_IS_AJ4_500: 'HS-AJ4-500',
+        PLATINE_HW_IS_S32A32: 'S32A32',
+        PLATINE_HW_IS_HS_TIME: 'HS-Time',
+        PLATINE_HW_IS_I2_PIR: 'UP-PIR2-Connect',
+        PLATINE_HW_IS_UP_RF: 'UP-RF',
+        PLATINE_HW_IS_IRRX: 'UP-IRRX',
+        PLATINE_HW_IS_HFRX: 'UP-HFRX',
+        PLATINE_HW_IS_D4_AN: 'HS-AD4',
+        PLATINE_HW_IS_D4_AB: 'HS-AD4e',
+        PLATINE_HW_IS_AD3e: 'HS-AD3e',
+        PLATINE_HW_IS_AD3: 'HS-AD3',
+        PLATINE_HW_IS_S1A1_WASSER_SUMMER: 'UP-AQ',
+        PLATINE_HW_IS_ARING1: 'UP-A Bell',
+        PLATINE_HW_IS_AD110: 'HS-AD1-1x10V',
+        PLATINE_HW_IS_UP_SI: 'UP-SI',
+        PLATINE_HW_IS_A32: 'EXT-A32',
+        PLATINE_HW_IS_S32: 'EXT-S32',
+        PLATINE_HW_IS_VI4: 'EXT-Vi4',
+        PLATINE_HW_IS_HS_JAL: 'HS-Jalousie',
+        PLATINE_HW_IS_HS_CLIMATE: 'HS-Climate',
+        PLATINE_HW_IS_HS_ACCESS: 'HS-Access 1',
+        PLATINE_HW_IS_19_AMP4: '19-Amp4',
+        PLATINE_HW_IS_DALI: 'HS-Dali',
+        PLATINE_HW_IS_EXT_AQV: 'EXT-AQV',
+        PLATINE_HW_IS_ACCESS2_LCD: 'AP-Access2(LCD)',
+        PLATINE_HW_IS_BELL2: '.WAV-Bell',
+        PLATINE_HW_IS_ACCESS2_MAIN: 'HS-Access 2',
+        PLATINE_HW_IS_VI_8X8: '19-Vi8x8',
+        PLATINE_HW_IS_AU_4X4: '19-Au4x4',
+        PLATINE_HW_IS_HS_COUNTER: 'HS-Counter',
+        PLATINE_HW_IS_HS_WL: 'HS-WL',
+        PLATINE_HW_IS_HS_SI6: 'HS-SI6',
+        PLATINE_HW_IS_GSM: 'EXT-GSM',
+        PLATINE_HW_IS_LCD3: 'UP-LCD',
+        PLATINE_HW_IS_UP_GL: 'UP-GL',
+        PLATINE_HW_IS_ALARM1: 'HS-Safety',
+        PLATINE_HW_IS_IR_TX_ALL: 'UP-IRTX',
+        PLATINE_HW_IS_IR_TX16: 'UP-IRTX2 (16bit)',
+        PLATINE_HW_IS_TLH: 'UP-TLH',
+        PLATINE_HW_IS_UP_T: 'UP-T',
+        PLATINE_HW_IS_UP_RF2: 'UP-RF',
+
+        PLATINE_HW_IS_PROUTE1: 'HS-PaketRouter',
+        PLATINE_HW_IS_EXT_LD: 'EXT-LD',
+        PLATINE_HW_IS_AR6: 'HS-AR6',
+        PLATINE_HW_IS_AJ3: 'HS-AJ3',
+        PLATINE_HW_IS_AT8: 'HS-AT8e',
+        PLATINE_HW_IS_EXT_AQV_PW: 'EXT-AQV-PW',
+        PLATINE_HW_IS_EXT_CODESCHLOSS: 'EXT-CS',
+
+        # PLATINE_HW_IS_S3: 'HS-S3HV',  # commented in original
+        PLATINE_HW_IS_HS_STe8: 'HS-S8-Pt1000',
+        PLATINE_HW_IS_HS_TCONTROL: 'HS-TControl',
+        PLATINE_HW_IS_LCD4x16M: 'LCD-4x16m',
+        PLATINE_HW_IS_POWER1: 'HS-Power 1',
+        PLATINE_HW_IS_LED_2X7: 'UP-LED 7-seg 2fach',
+    }
+
+    if b in mapping:
+        return mapping[b]
+    elif b >= PLATINE_HW_IS_VIRTUAL_BASE:
+        return f'VT{b - PLATINE_HW_IS_VIRTUAL_BASE}'
+    else:
+        return ''
