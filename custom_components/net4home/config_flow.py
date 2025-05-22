@@ -92,7 +92,18 @@ class Net4HomeOptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_MI: user_input.get(CONF_MI),
                     CONF_OBJADR: user_input.get(CONF_OBJADR),
                 }
-                
+
+                options = dict(self.entry.options)
+                devices = options.get("devices", [])
+                device_mi = user_input.get("device_mi")
+                device_type = user_input.get("device_module_type")
+                if device_mi is not None and device_type:
+                    devices.append({"mi": device_mi, "module_type": device_type})
+                options["devices"] = devices
+
+                self.hass.config_entries.async_update_entry(
+                    self.entry, data=data, options=options
+                )
                 await self.hass.config_entries.async_reload(self.entry.entry_id)
                 return self.async_create_entry(title="", data={})
 
@@ -109,6 +120,8 @@ class Net4HomeOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional("software_version", default=""): str,
                 vol.Optional("ee_text", default=""): str,
                 vol.Optional("module_mi", default=0): int,
+                vol.Optional("device_module_type", default=""): str,
+                vol.Optional("device_mi", default=0): int,
             }
         )
 

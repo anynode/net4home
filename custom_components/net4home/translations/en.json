@@ -35,7 +35,9 @@
           "module_type": "Module Type",
           "software_version": "Software Version",
           "ee_text": "EE Text",
-          "module_mi": "Module MI"
+          "module_mi": "Module MI",
+          "device_module_type": "Device Module Type",
+          "device_mi": "Device MI"
         }
       }
     }

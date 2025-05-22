@@ -35,7 +35,9 @@
           "module_type": "Tipo de módulo",
           "software_version": "Versión de software",
           "ee_text": "Texto EE",
-          "module_mi": "MI del módulo"
+          "module_mi": "MI del módulo",
+          "device_module_type": "Tipo de módulo del dispositivo",
+          "device_mi": "MI del dispositivo"
         }
       }
     }

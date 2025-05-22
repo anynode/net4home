@@ -28,7 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.data.get("MI"),
             entry.data.get("OBJADR"),
             entry.entry_id,
-            # modules=entry.options.get("modules") if entry.options else None,
+            devices=entry.options.get("devices") if entry.options else None,
         )
         _LOGGER.debug("Net4HomeHub created")
         await hub.async_start()
