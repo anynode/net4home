@@ -1,6 +1,6 @@
 import logging
 from typing import NamedTuple
-from typing import Dict
+from typing import Dict, Any
 from .const import (
     D0_SET_IP,
     D0_ENUM_ALL,
@@ -214,7 +214,7 @@ def n4h_parse(payload_bytes: bytes) -> tuple[str, TN4Hpaket]:
     payload = payload_bytes.hex()
     ret = ""
 
-    _LOGGER.warning("Paket Payload: %s", payload_bytes.hex())
+    # _LOGGER.debug("Paket Payload: %s", payload_bytes.hex())
 
     if len(payload) < 40:
         return ("Payload zu kurz für Parsing", None)
@@ -369,7 +369,6 @@ def interpret_n4h_sFkt(paket) -> str:
         pnr = (paket.type8 & saPNR_MASK) >> 4
         sFkt += f"AR{pnr} "
 
-    # Basierend auf ddata[0] können weitere Interpretationen ergänzt werden
     b0 = paket.ddata[0]
 
     if b0 == D0_SET_N:
@@ -396,6 +395,8 @@ def interpret_n4h_sFkt(paket) -> str:
         sFkt += "D0_TOGGLE"
     elif b0 == D0_REQ:
         sFkt += "D0_REQ"
+    elif b0 == D0_SET:
+        sFkt += f"D0_SET, {paket.ddata[1]},{paket.ddata[2]}"
     elif b0 == D0_INC:
         sFkt += "D0_INC"
     elif b0 == D0_DEC:
@@ -719,3 +720,29 @@ def platine_typ_to_name_a(b: int) -> str:
         return f'VT{b - PLATINE_HW_IS_VIRTUAL_BASE}'
     else:
         return ''
+
+
+def add_module_if_new(self, device_info: Dict[str, Any]) -> None:
+    modules = self.entry.options.get("modules", [])
+    module_mi = device_info.get("module_mi")
+
+    if module_mi is None:
+        # Invalid or incomplete device info
+        return
+
+    # Check if module already registered
+    if any(module.get("module_mi") == module_mi for module in modules):
+        return  # Already registered, do nothing
+
+    # Append new module
+    modules.append(
+        {
+            "module_type": device_info.get("module_type"),
+            "software_version": device_info.get("software_version"),
+            "ee_text": device_info.get("ee_text"),
+            "module_mi": module_mi,
+        }
+    )
+    # Save back updated modules list
+    self.entry.options["modules"] = modules
+    # If your platform requires, trigger save/update here (depends on your framework)

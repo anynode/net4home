@@ -17,10 +17,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
     return True
 
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry
-) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("async_setup_entry called for net4home, entry: %s", entry)
     try:
         hub = Net4HomeHub(
@@ -31,7 +28,7 @@ async def async_setup_entry(
             entry.data.get("MI"),
             entry.data.get("OBJADR"),
             entry.entry_id,
-            modules=entry.options.get("modules") if entry.options else None,
+            # modules=entry.options.get("modules") if entry.options else None,
         )
         _LOGGER.debug("Net4HomeHub created")
         await hub.async_start()

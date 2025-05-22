@@ -5,8 +5,7 @@ import logging
 import binascii
 
 from .const import N4H_IP_PORT, DEFAULT_MI, DEFAULT_OBJADR, N4HIP_PT_PAKET, N4HIP_PT_PASSWORT_REQ, N4HIP_PT_OOB_DATA_RAW
-from .compressor import decompress, CompressionError
-from .n4htools import log_parsed_packet, interpret_n4h_sFkt, TN4Hpaket, n4h_parse
+from .n4htools import log_parsed_packet, interpret_n4h_sFkt, TN4Hpaket, n4h_parse, add_module_if_new
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,12 +72,15 @@ class Net4HomeApi:
         await self._writer.drain()
         _LOGGER.debug("Passwortpaket gesendet")
 
+
     async def async_disconnect(self):
         _LOGGER.info("Verbindung zum net4home Bus trennen")
         if self._writer:
             self._writer.close()
             await self._writer.wait_closed()
             _LOGGER.debug("Verbindung geschlossen")
+
+
 
     async def async_listen(self):
         _LOGGER.info("Starte Listener für Busnachrichten")

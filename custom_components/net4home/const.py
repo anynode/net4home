@@ -1,5 +1,17 @@
 """Constants for the net4home integration."""
 
+from homeassistant.const import Platform
+
+PLATFORMS = [
+    Platform.BINARY_SENSOR,
+    Platform.CLIMATE,
+    Platform.COVER,
+    Platform.LIGHT,
+    Platform.SCENE,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
+
 # Domain and network defaults
 DOMAIN = "net4home"
 DEFAULT_MI = 65281

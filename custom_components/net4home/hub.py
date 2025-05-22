@@ -19,16 +19,6 @@ class Net4HomeDevice:
     data: dict = field(default_factory=dict)
 
 
-@dataclass
-class Net4HomeModule:
-    """Representation of a configured module."""
-
-    module_type: str
-    software_version: str
-    ee_text: str
-    mi: int
-
-
 class Net4HomeHub:
     """Manage a connection to a net4home server."""
 
@@ -37,7 +27,6 @@ class Net4HomeHub:
         self.entry_id = entry_id
         self.api = Net4HomeApi(hass, host, port, password, mi, objadr)
         self.devices: Dict[str, Net4HomeDevice] = {}
-        self.modules: list[Net4HomeModule] = modules or []
 
     async def async_start(self):
         """Connect to the server and start listening."""
@@ -59,7 +48,3 @@ class Net4HomeHub:
         _LOGGER.debug("Registered new device %s of type %s", device_id, device_type)
         return device
 
-    def register_module(self, module: Net4HomeModule) -> None:
-        """Register a manually configured module."""
-        self.modules.append(module)
-        _LOGGER.debug("Registered module %s", module)

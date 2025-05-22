@@ -9,8 +9,8 @@ from .const import DOMAIN, N4H_IP_PORT, DEFAULT_MI, DEFAULT_OBJADR, CONF_MI, CON
 from .api import Net4HomeApi
 
 class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
-    VERSION = 1
 
+   
     async def async_step_user(self, user_input=None):
         errors = {}
         if user_input is not None:
@@ -56,7 +56,7 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class Net4HomeOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options for Net4Home entries."""
+    """Handle options for Net4Home config flow."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         self.entry = entry
@@ -92,21 +92,7 @@ class Net4HomeOptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_MI: user_input.get(CONF_MI),
                     CONF_OBJADR: user_input.get(CONF_OBJADR),
                 }
-                modules = self.entry.options.get("modules", [])
-                if user_input.get("module_type"):
-                    modules.append(
-                        {
-                            "module_type": user_input.get("module_type"),
-                            "software_version": user_input.get("software_version"),
-                            "ee_text": user_input.get("ee_text"),
-                            "module_mi": user_input.get("module_mi"),
-                        }
-                    )
-                self.hass.config_entries.async_update_entry(
-                    self.entry,
-                    data=data,
-                    options={"modules": modules},
-                )
+                
                 await self.hass.config_entries.async_reload(self.entry.entry_id)
                 return self.async_create_entry(title="", data={})
 
