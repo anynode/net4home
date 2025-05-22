@@ -31,7 +31,11 @@
           "port": "Puerto (3478)",
           "password": "Contraseña",
           "MI": "MI",
-          "OBJADR": "OBJADR"
+          "OBJADR": "OBJADR",
+          "module_type": "Tipo de módulo",
+          "software_version": "Versión de software",
+          "ee_text": "Texto EE",
+          "module_mi": "MI del módulo"
         }
       }
     }
