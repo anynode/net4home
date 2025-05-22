@@ -36,6 +36,7 @@ async def async_setup_entry(
         await hub.async_start()
         hass.data[DOMAIN][entry.entry_id] = hub
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        entry.async_on_unload(entry.add_update_listener(update_listener))
         _LOGGER.info("async_setup_entry for net4home finished")
         return True
     except Exception as e:
@@ -59,3 +60,8 @@ async def async_unload_entry(
         hub = hass.data[DOMAIN].pop(entry.entry_id)
         await hub.async_stop()
     return unload_ok
+
+
+async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload config entry when options change."""
+    await hass.config_entries.async_reload(entry.entry_id)
