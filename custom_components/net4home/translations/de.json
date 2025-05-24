@@ -10,6 +10,10 @@
           "password": "Passwort",
           "MI": "MI",
           "OBJADR": "OBJADR"
+        },
+		"data_description": {
+              "MI": "Die MI Adresse von der HA Instanz",
+			  "OBJADR": "Die Absendeadresse der HA Instanz"
         }
       }
     },

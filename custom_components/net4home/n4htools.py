@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from typing import NamedTuple
 from typing import Dict, Any
 from .const import (
@@ -18,6 +19,8 @@ from .const import (
     D0_VALUE_ACK,
     D0_VALUE_REQ,
     D0_STATUS_INFO,
+    D0_RD_ACTOR_DATA,
+    D0_RD_ACTOR_DATA_ACK,
     saCYCLIC,
     saACK_REQ,
     saPNR_MASK,
@@ -191,9 +194,26 @@ from .const import (
     PLATINE_HW_IS_S32,
     PLATINE_HW_IS_PC_SOFTWARE,
     PLATINE_HW_IS_VIRTUAL_BASE,
+    OUT_HW_NR_IS_ONOFF,
+    OUT_HW_NR_IS_TIMER,
+    OUT_HW_NR_IS_ONOFF_STATUS,
+    OUT_HW_NR_IS_SLOW_PWM,
+    OUT_HW_NR_IS_BIN_BLINKER,
+    OUT_HW_NR_IS_FENSTERUEBERWACHUNG,
+    OUT_HW_NR_IS_SOFT_TOGGLE_DIM,
+    OT_AR,
+    OT_ART,
+    OT_ARS,
+    OT_APWM,
+    OT_BLINK,
+    OT_FENSTERUE,
+    OT_NO,
+    OT_AD,
+    OT_AD_TOG_SOFT,
+    OT_ADT,
 )
 
-    
+  
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -213,12 +233,11 @@ class TN4Hpaket(NamedTuple):
 def n4h_parse(payload_bytes: bytes) -> tuple[str, TN4Hpaket]:
     payload = payload_bytes.hex()
     ret = ""
-
-    # _LOGGER.debug("Paket Payload: %s", payload_bytes.hex())
-
-    if len(payload) < 40:
-        return ("Payload zu kurz für Parsing", None)
-
+    paket = None
+    
+    if len(payload) < 5:
+        return (f"Payload zu kurz für Parsing {len(payload)}", None)
+    
     ip = int(payload[2:4] + payload[0:2], 16)
     ret += f"IP={ip}\t"
 
@@ -273,10 +292,11 @@ def n4h_parse(payload_bytes: bytes) -> tuple[str, TN4Hpaket]:
         posb=posb,
     )
 
-    # log_line = f"OBJ {ipsrc:04X}   {objsrc:05d} >  {ipdst:04X} {datalen:02X} {' '.join(ddata_hex.upper()[i:i+2] for i in range(0, len(ddata_hex), 2))}  {interpret_n4h_sFkt(paket)}"
-    log_line = f"OBJ {ipsrc:04X}   {objsrc:05d} >  {ipdst:04X} {datalen:02X} {' '.join(ddata_hex.upper()[i:i+2] for i in range(0, len(ddata_hex), 2)).ljust(45)} {interpret_n4h_sFkt(paket)}"
-
-    _LOGGER.debug(log_line)
+    if paket is None: 
+        _LOGGER.debug("Paket Payload: %s", payload_bytes.hex())
+    else:
+        log_line = f"OBJ {ipsrc:04X}   {objsrc:05d} >  {ipdst:04X} {datalen:02X} {' '.join(ddata_hex.upper()[i:i+2] for i in range(0, len(ddata_hex), 2)).ljust(45)} {interpret_n4h_sFkt(paket)}"
+        _LOGGER.debug(log_line)
 
     return ret, paket
 
@@ -385,6 +405,13 @@ def interpret_n4h_sFkt(paket) -> str:
     elif b0 == D0_ACK_TYP:
         sFkt += "D0_ACK_TYP "
         sFkt += " " + platine_typ_to_name_a(paket.ddata[1])
+        # paket.ddata[10] -> paket.ddata[10] and D10_CONFIG_ENABLE_BIT ) <>0 -> Konfiguration/Betrieb/Factory
+    elif b0 == D0_RD_ACTOR_DATA:
+        sFkt += "D0_RD_ACTOR_DATA"
+    elif b0 == D0_RD_ACTOR_DATA_ACK:
+        sFkt += "D0_RD_ACTOR_DATA_ACK"
+    elif b0 == D0_GET_SERIAL_ACK:
+        sFkt += "D0_GET_SERIAL_ACK - Serial " + str((paket.ddata[1] << 16) | (paket.ddata[2] << 8) | paket.ddata[3])
     elif b0 == D0_VALUE_REQ:
         sFkt += "D0_VALUE_REQ"
     elif b0 == D0_STATUS_INFO:
@@ -406,6 +433,9 @@ def interpret_n4h_sFkt(paket) -> str:
         sFkt += "D0_DEC"
     elif b0 == D0_ENUM_ALL:
         sFkt += "D0_ENUM_ALL"
+    elif b0 == 255:
+        # Paket ins leere
+        sFkt += ""
     else:
         sFkt += f"Unbekanntes Paket 0x{b0:02X}"
 
@@ -587,7 +617,7 @@ def decode_and_print_value_ack(paket: bytes) -> str:
         s = "Regenmenge " + s_last_value_ack_text
     elif ddata[1] == IN_HW_NR_IS_REGEN:
         i_analog_value = ddata[3] * 256 + ddata[4]
-        s_last_value_ack_text = f"{i_analog_value} %"
+        s_last_value_ack_text = f"{i_analog_value}%"
         s = "Regen " + s_last_value_ack_text
     elif ddata[1] == IN_HW_NR_IS_HUMIDITY:
         i_analog_value = ddata[3] * 256 + ddata[4]
@@ -725,27 +755,91 @@ def platine_typ_to_name_a(b: int) -> str:
         return ''
 
 
-def add_module_if_new(self, device_info: Dict[str, Any]) -> None:
-    modules = self.entry.options.get("modules", [])
-    module_mi = device_info.get("module_mi")
+def text_to_adrG(s: str) -> int:
+    """
+    Wandelt einen String in eine Adresse um.
+    Wenn der String mit 'G' oder 'g' beginnt, wird 0x8000 gesetzt.
+    Restliche Zeichen werden als Dezimalzahl interpretiert.
+    """
+    s = s.strip()
+    result = 0
+    if s.lower().startswith('g'):
+        result = 0x8000
+        s = s[1:]
+    try:
+        value = int(s)
+    except ValueError:
+        value = 0
+    return result + value
 
-    if module_mi is None:
-        # Invalid or incomplete device info
-        return
 
-    # Check if module already registered
-    if any(module.get("module_mi") == module_mi for module in modules):
-        return  # Already registered, do nothing
+def adrG_to_text(w: int) -> str:
+    base = w & 0x7FFF
+    if (w & 0x8000) != 0:
+        return 'G' + str(base)
+    return str(base)
 
-    # Append new module
-    modules.append(
-        {
-            "module_type": device_info.get("module_type"),
-            "software_version": device_info.get("software_version"),
-            "ee_text": device_info.get("ee_text"),
-            "module_mi": module_mi,
-        }
-    )
-    # Save back updated modules list
-    self.entry.options["modules"] = modules
-    # If your platform requires, trigger save/update here (depends on your framework)
+
+def StrToAdr(s: str) -> int:
+    return text_to_adrG(s)
+
+
+def StrToAdr2(s: str) -> int:
+    s = s.strip()
+    if s.upper().startswith('MI'):
+        hex_part = s[2:6]  # 4 Zeichen nach MI
+        try:
+            value = int(hex_part, 16)
+        except ValueError:
+            value = 0
+        return 0x10000 + value
+    return text_to_adrG(s)
+
+
+def StrToAdrDef0(sAdr: str) -> int:
+    sAdr = sAdr.strip()
+    if sAdr == '':
+        return 0
+    return text_to_adrG(sAdr)
+
+
+def AdrToStr(w: int) -> str:
+    return adrG_to_text(w)
+
+
+def AdrToStr2(w: int) -> str:
+    if w >= 0x10000:
+        return f"MI{w - 0x10000:04X}"
+    return adrG_to_text(w)
+
+def AR_d0_to_ot(d0: int) -> int:
+    """
+    Wandelt d0 (Output Hardware Nummer) in den OT_AR-Typ um.
+    """
+    if d0 == OUT_HW_NR_IS_ONOFF:
+        return OT_AR
+    if d0 == OUT_HW_NR_IS_TIMER:
+        return OT_ART
+    if d0 == OUT_HW_NR_IS_ONOFF_STATUS:
+        return OT_ARS
+    if d0 == OUT_HW_NR_IS_SLOW_PWM:
+        return OT_APWM
+    if d0 == OUT_HW_NR_IS_BIN_BLINKER:
+        return OT_BLINK
+    if d0 == OUT_HW_NR_IS_FENSTERUEBERWACHUNG:
+        return OT_FENSTERUE
+    return OT_NO
+
+
+def AD_d0_to_ot(d0: int) -> int:
+    """
+    Wandelt d0 (Output Hardware Nummer) in den OT_AD-Typ um.
+    """
+    if d0 == OUT_HW_NR_IS_ONOFF:
+        return OT_AD
+    if d0 == OUT_HW_NR_IS_SOFT_TOGGLE_DIM:
+        return OT_AD_TOG_SOFT
+    if d0 == OUT_HW_NR_IS_TIMER:
+        return OT_ADT
+    return OT_NO
+

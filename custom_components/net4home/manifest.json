@@ -1,13 +1,12 @@
 {
   "domain": "net4home",
   "name": "net4home",
+  "codeowners": ["@anynode"],
   "version": "1",
+  "integration_type": "hub",
+  "config_flow": true,
   "documentation": "https://github.com/anynode/net4home",
   "requirements": [],
   "dependencies": [],
-  "config_flow": true,
-  "zeroconf": [
-    "_n4hbuscon._tcp.local."
-  ],
   "iot_class": "local_push"
 }

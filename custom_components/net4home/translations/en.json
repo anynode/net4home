@@ -10,6 +10,10 @@
           "password": "Password",
           "MI": "MI",
           "OBJADR": "OBJADR"
+        },
+		"data_description": {
+              "MI": "The MI address of the HA instance",
+			  "OBJADR": "The source address of the HA instance"
         }
       }
     },

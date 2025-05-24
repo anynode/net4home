@@ -1,11 +1,18 @@
+from typing import Any
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.core import callback
+from homeassistant.core import callback, HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.config_entries import ConfigEntry
+
 from .const import DOMAIN
 from .hub import Net4HomeHub, Net4HomeDevice
 
-async def async_setup_entry(hass, entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: Any,
+) -> None:
     """Set up net4home binary sensor entities."""
     hub: Net4HomeHub = hass.data[DOMAIN][entry.entry_id]
 
@@ -30,7 +37,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 class Net4HomeBinarySensor(BinarySensorEntity):
     """Representation of a net4home binary sensor."""
 
-    def __init__(self, hub: Net4HomeHub, entry, device: Net4HomeDevice):
+    def __init__(self, hub: Net4HomeHub, entry: ConfigEntry, device: Net4HomeDevice):
         self.hub = hub
         self.entry = entry
         self.device = device
@@ -38,8 +45,8 @@ class Net4HomeBinarySensor(BinarySensorEntity):
         self._attr_name = device.name
         self._attr_unique_id = f"{entry.entry_id}_{device.device_id}"
 
-    async def async_added_to_hass(self):
-        """Register dispatcher to receive updates."""
+    async def async_added_to_hass(self) -> None:
+        """Register dispatcher to receive updates and load initial state."""
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
@@ -47,9 +54,13 @@ class Net4HomeBinarySensor(BinarySensorEntity):
                 self._handle_update,
             )
         )
+        # Optional: Initial status fetch if supported by hub
+        if hasattr(self.hub, "async_get_device_state"):
+            initial_state = await self.hub.async_get_device_state(self.device.device_id)
+            self._handle_update(initial_state)
 
     @callback
-    def _handle_update(self, value):
+    def _handle_update(self, value: Any) -> None:
         """Update sensor state from dispatcher."""
         self._state = bool(value)
         self.async_write_ha_state()
