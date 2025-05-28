@@ -3,29 +3,24 @@ import asyncio
 import struct
 import logging
 import binascii
+import time
 
 from typing import Optional
+
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from .helpers import register_device_in_registry
-from homeassistant.components.switch import SwitchEntity
 from homeassistant.helpers.device_registry import DeviceInfo
+
+from .helpers import register_device_in_registry
+from .models import Net4HomeDevice  
+from .n4htools import compress_section, decode_d2b, n4h_parse, platine_typ_to_name_a  
 
 from .const import (
     N4H_IP_PORT,
     DEFAULT_MI,
     DEFAULT_OBJADR,
     N4HIP_PT_PAKET,
-)
-from .n4htools import (
-    log_parsed_packet,
-    interpret_n4h_sFkt,
-    TN4Hpaket,
-    n4h_parse,
-    platine_typ_to_name_a,
-)
-from .helpers import register_device_in_registry
-
-from .const import (
+    N4HIP_PT_PASSWORT_REQ,
+    N4HIP_PT_OOB_DATA_RAW,
     D0_SET_IP,
     D0_ENUM_ALL,
     D0_ACK_TYP,
@@ -45,34 +40,18 @@ from .const import (
     D0_RD_ACTOR_DATA,
     D0_RD_ACTOR_DATA_ACK,
     OUT_HW_NR_IS_ONOFF,
+    OUT_HW_NR_IS_TIMER,
+    OUT_HW_NR_IS_JAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-from typing import Optional
-
-class Net4HomeDevice:
-    def __init__(
-        self,
-        device_id: str,
-        name: str,
-        model: str,
-        device_type: str,
-        via_device: Optional[str] = None,  
-    ):
-        self.device_id = device_id
-        self.name = name
-        self.model = model
-        self.device_type = device_type
-        self.via_device = via_device
-
 
 # Receive data from Bus connector
 class N4HPacketReceiver:
     def __init__(self):
         self._buffer = bytearray()
 
-    def feed_data(self, data: bytes):
+    def receive_raw_command(self, data: bytes):
         self._buffer.extend(data)
         packets = []
 
@@ -93,13 +72,65 @@ class N4HPacketReceiver:
             if ptype == N4HIP_PT_PAKET:
                 payload = self._buffer[8:total_len]
                 packets.append((ptype, payload))
+            elif ptype == N4HIP_PT_OOB_DATA_RAW:
+                _LOGGER.debug(f"Raw OOB data packets received.")
+            elif ptype == N4HIP_PT_PASSWORT_REQ:
+                _LOGGER.debug(f"Password packet received.")
             else:
                 _LOGGER.debug(f"Ignored packet type: {ptype}")
 
             del self._buffer[:total_len + 8]
         return packets
-        
 
+# Send data to Bus connector
+class N4HPacketSender:
+    def __init__(self, writer: asyncio.StreamWriter):
+        self._writer = writer
+
+    async def send_raw_command(self, ipdst: int, ddata: bytes, objsource: int = 0, mi: int = 65281):
+
+        try:
+            # === Paketaufbau im Hexstring
+            sendbus = "A10F0000"         # fester Prefix (Paketkennung)
+            sendbus += "4E000000"        # reservierte Payload-Länge
+            sendbus += "00"              # ?
+            sendbus += "00"              # type8 = 0 for OBJ
+
+            # === Adressen codieren
+            sendbus += decode_d2b(mi)           # ipsrc
+            sendbus += decode_d2b(ipdst)        # ipdst
+            sendbus += decode_d2b(objsource)    # objsrc
+
+            # === DDATA vorbereiten: erstes Byte = Länge, dann der eigentliche Payload
+            full_ddata = bytes([len(ddata)]) + ddata
+
+            # === Auf 64 Byte auffüllen (128 Hexzeichen)
+            ddata_hex = full_ddata.hex().upper().ljust(128, "0")
+            sendbus += ddata_hex
+
+            # === Abschluss mit csRX, csCalc, length, posb
+            sendbus += "00000000"
+
+            # === Kompression & Verpackung
+            compressed = compress_section(sendbus)
+            final_bytes = bytes.fromhex(compressed)
+
+            # === Logging
+            ddata_list = " ".join(ddata.hex()[i:i+2].upper() for i in range(0, len(ddata.hex()), 2))
+            log_line = (
+                f"SEND: ipsrc=0x{mi:04X}, ipdst=0x{ipdst:04X}, objsrc={objsource}, "
+                f"datalen={len(ddata)}, ddata=[{ddata_list}], "
+                f"final_bytes={compressed}"
+            )
+            #_LOGGER.debug(log_line)
+            
+            # === Senden
+            self._writer.write  (final_bytes)
+            await self._writer.drain()
+
+        except Exception as e:
+            _LOGGER.error(f"Fehler beim Senden (raw): {e}")
+            
 class Net4HomeApi:
     def __init__(
         self,
@@ -110,6 +141,7 @@ class Net4HomeApi:
         mi: int = DEFAULT_MI,
         objadr: int = DEFAULT_OBJADR,
         entry_id: Optional[str] = None,
+        entry=None,  
     ):
         self._hass = hass
         self._entry_id = entry_id
@@ -121,22 +153,48 @@ class Net4HomeApi:
         self._reader = None
         self._writer = None
         self._packet_receiver = N4HPacketReceiver()
-        self.devices = {}
-        
-    async def async_connect(self):
-        _LOGGER.info(f"Connect with net4home Bus connector at {self._host}:{self._port}")
-        self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
-        _LOGGER.debug("TCP-Connection established")
+        self._packet_sender: Optional[N4HPacketSender] = None
+        self.devices: dict[str, Net4HomeDevice] = {}
+        self._entry = entry
+       
 
-        try:
-            packet_bytes = binascii.unhexlify(self._password)
-        except binascii.Error as e:
-            _LOGGER.error(f"Ungültiger Hex-String für Passwort: {e}")
-            raise
+    async def async_connect(self):
+
+        self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
+        _LOGGER.info(f"Connect with net4home Bus connector at {self._host}:{self._port}")
+
+        packet_bytes = binascii.unhexlify(
+            "420000000008ac0f0000cd564c77400c000021203732363343423543464343333646323630364344423338443945363135394535401b0000080700000087000000c000000aac"
+        )
 
         self._writer.write(packet_bytes)
         await self._writer.drain()
-        _LOGGER.debug("Credentials to Bus connector sent")
+        _LOGGER.debug("Credentials to Bus connector sent. Waiting for approval...")
+
+        self._packet_sender = N4HPacketSender(self._writer)
+
+
+    async def async_reconnect(self, max_attempts: int = 5, base_delay: float = 5.0) -> None:
+        for attempt in range(1, max_attempts + 1):
+            delay = base_delay * attempt
+            _LOGGER.warning(f"Try to reconnect - attempt {attempt}/{max_attempts} in {delay:.1f}s...")
+
+            await asyncio.sleep(delay)
+
+            try:
+                await self.async_connect()
+                if self._writer and not self._writer.is_closing():
+                    _LOGGER.info("Reconnect successful")
+
+                    for device in self.devices.values():
+                        if device.device_type == "switch":
+                            await self.async_request_status(device.device_id)
+                    return
+            except Exception as e:
+                _LOGGER.error(f"Reconnect fehlgeschlagen (Versuch {attempt}): {e}")
+
+        _LOGGER.error("Maximale Reconnect-Versuche erreicht. Keine Verbindung zum Bus möglich.")
+
 
     async def async_disconnect(self):
         if self._writer:
@@ -145,15 +203,20 @@ class Net4HomeApi:
             _LOGGER.debug("Connection to net4home Bus connector closed")
 
     async def async_listen(self):
-        _LOGGER.info("Start listening for bus messages")
+        _LOGGER.debug("Start listening for bus packets")
         try:
             while True:
-                data = await self._reader.read(4096)
-                if not data:
-                    _LOGGER.info("Connection closed to net4home Bus connector")
-                    break
-
-                packets = self._packet_receiver.feed_data(data)
+                try:
+                    data = await self._reader.read(4096)
+                    if not data:
+                        _LOGGER.warning("Verbindung zum net4home Busconnector wurde geschlossen")
+                        await self.async_reconnect()
+                        continue
+                except (ConnectionResetError, OSError) as e:
+                    _LOGGER.error(f"Network error: {e}")
+                    await self.async_reconnect()
+                    continue
+                packets = self._packet_receiver.receive_raw_command(data)
                 for ptype, payload in packets:
                     try:
                         ret, paket = n4h_parse(payload)
@@ -170,77 +233,366 @@ class Net4HomeApi:
                         # Identify the action what we have to do
                         b0 = paket.ddata[0]
                         
-                        # We have a device answered to a enum request
+                        # Discovered a module, maybe we know it
                         if b0 == D0_ACK_TYP: 
-                            device_id = f"MI{paket.ipsrc:05d}"
+                            device_id = f"MI{paket.ipsrc:04x}"
                             model = platine_typ_to_name_a(paket.ddata[1])
                             sw_version = ""
                             name = device_id
 
-                            # Register the device and start with a nonblocking connection 
-                            asyncio.create_task(
-                                register_device_in_registry(
-                                    self._hass,
-                                    self._entry_id,
+                            _LOGGER.debug(f"ACK_TYP received for device: {device_id} ({model})")
+
+                            try:
+                                await register_device_in_registry(
+                                    hass=self._hass,
+                                    entry=self._entry,
                                     device_id=device_id,
                                     name=name,
                                     model=model,
                                     sw_version=sw_version,
+                                    hw_version="",
+                                    device_type="module", 
+                                    via_device="",
+                                    api=self,
                                 )
-                            )
-                        elif b0 == D0_RD_ACTOR_DATA:   
-                            device_id = ""
-                        # We have a device answered to a configuration request
-                        elif b0 == D0_RD_ACTOR_DATA_ACK:  
-                            # Let´s register the correct type we see in D2
-                            b2 = paket.ddata[2]
+                            except Exception as e:
+                                _LOGGER.error(f"Error during registration of device (module) {device_id}: {e}")
+                        elif b0 == D0_ACTOR_ACK:
+                            device_id = f"OBJ{paket.objsrc:05d}"
+
+                            device = self.devices.get(device_id)
+                            if device.device_type == 'switch':
+                                is_on = paket.ddata[2] == 1
+                                _LOGGER.debug(f"STATUS_INFO_ACK für {device_id}: {'ON' if is_on else 'OFF'}")
+                                async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_on)
+                            elif device.device_type == 'timer':
+                                is_on = paket.ddata[2] == 1
+                                _LOGGER.debug(f"STATUS_INFO_ACK für {device_id}: {'ON' if is_on else 'OFF'}")
+                                async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_on)
+                            elif device.device_type == 'cover':
+                                is_closed = paket.ddata[2] != 1 
+                                _LOGGER.debug(f"STATUS_INFO_ACK für {device_id}: {'CLOSED' if is_on else 'OPEN'}")
+                                async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_closed)
+
+                        elif b0 == D0_RD_ACTOR_DATA_ACK:
+                            _LOGGER.debug(f"D0_RD_ACTOR_DATA_ACK identified: {paket.ddata[2]}")
                             
-                            # Hey, it´s an AR (switch entity)
+                            b1  = paket.ddata[1] + 1 # channel
+                            b2  = paket.ddata[2]     # actor type
+                            b8  = paket.ddata[8]     # OBJ hi
+                            b9  = paket.ddata[9]     # OBJ lo
+
+                            device_id = f"OBJ{(b8*256+b9):05d}"
+                            objadr = (b8 << 8) + b9
+                            via_device = f"MI{paket.ipsrc:04x}"
+
+                            # We have a classic switch with ON/OFF feature
                             if b2 == OUT_HW_NR_IS_ONOFF:
-                                device_id = f"OBJ{(paket.ddata[8]*256+paket.ddata[9]):04d}"
-                                model = "Schalter"
-                                name = device_id
-                                via_device = "MI0113"
-                                
-                                new_ar = Net4HomeDeviceAR(
-                                    device_id=device_id,
-                                    name=name,
-                                    model=model,
-                                    device_type="switch",  
-                                    via_device=via_device,
-                                )
+                                _LOGGER.debug(f"OUT_HW_NR_IS_ONOFF identified: {device_id}")
 
-                                new_ar._state = is_on
-                                self.devices[device_id] = new_ar
-                                
-                                asyncio.create_task(
-                                    register_device_in_registry(
-                                        self._hass,
-                                        self._entry_id,
+                                # Module details
+                                b3  = paket.ddata[2]     # time1 hi
+                                b4  = paket.ddata[3]     # time1 lo
+                                b5  = paket.ddata[4]     # Power Up (0=OFF, 1=ON, 2=ASBEFORE, 3=NoChange, 4=ON100% ) 
+                                b6  = paket.ddata[5]     # min
+                                b7  = paket.ddata[6]     # Status update
+                                b10 = paket.ddata[9]     # time2 hi
+                                b11 = paket.ddata[10]    # time2 lo
+                                b12 = paket.ddata[11]    # inverted
+
+                                try:
+                                    await register_device_in_registry(
+                                        hass=self._hass,
+                                        entry=self._entry,
                                         device_id=device_id,
-                                        name=name,
-                                        model=model,
+                                        name = f"CH{b1}_{device_id[3:]}",
+                                        model="Schalter",
                                         sw_version="",
+                                        hw_version="",
+                                        device_type="switch",
+                                        via_device=via_device,
+                                        api=self,
+                                        objadr=objadr,
                                     )
-                                )
+                                except Exception as e:
+                                    _LOGGER.error(f"Error during registration of ONOFF device (channel) {device_id}: {e}")
 
-                                from homeassistant.helpers.dispatcher import async_dispatcher_send
-                                async_dispatcher_send(self._hass, f"net4home_new_device_{self._entry_id}", new_ar)
+                            # We have a classic switch with ON/OFF and the timer feature
+                            if b2 == OUT_HW_NR_IS_TIMER:
+                                _LOGGER.debug(f"OUT_HW_NR_IS_TIMER identified: {device_id}")
 
-                            # ddata[2]  -> Type ONOFF, TIMER....
-                            # ddata[3]  -> ddata[3]*256+ddata[4]; (Zeit1)
-                            # ddata[4]  -> siehe 3
-                            # ddata[5]  -> PowerUp
-                            # ddata[6]  -> scheinbar ungenutzt bei AR                          
-                            # ddata[7]  -> Statusänderungen
-                            # ddata[8]*256+ ddata[9] -> Adresse
-                            # ddata[10]:= hi(t2);(Zeit2)
-                            # ddata[11]:= lo(t2);
-                            # ddata[12] -> OUT_OPTION_2_MOTOR_ANLAUF/OUT_OPTION_2_INV_OUT 
+                                # Module details
+                                b3  = paket.ddata[2]     # time1 hi
+                                b4  = paket.ddata[3]     # time1 lo
+                                b5  = paket.ddata[4]     # Power Up (0=OFF, 1=ON, 2=ASBEFORE, 3=NoChange, 4=ON100% ) 
+                                b6  = paket.ddata[5]     # min
+                                b7  = paket.ddata[6]     # Status update
+                                b10 = paket.ddata[9]     # time2 hi
+                                b11 = paket.ddata[10]    # time2 lo
+                                b12 = paket.ddata[11]    # inverted
 
-                            # 1F 00 04 00 01 00 FF 01 05 DD 00 01 00 15
 
+                                try:
+                                    await register_device_in_registry(
+                                        hass=self._hass,
+                                        entry=self._entry,
+                                        device_id=device_id,
+                                        name = f"CH{b1}_{device_id[3:]}",
+                                        model="Timer",
+                                        sw_version="",
+                                        hw_version="",
+                                        device_type="switch",
+                                        via_device=via_device,
+                                        api=self,
+                                        objadr=objadr,
+                                    )
+                                except Exception as e:
+                                    _LOGGER.error(f"Error during registration of TIMER device (channel) {device_id}: {e}")
+
+                            # We have a cover 
+                            if b2 == OUT_HW_NR_IS_JAL:
+
+                                _LOGGER.debug(f"OUT_HW_NR_IS_JAL Paket : {' '.join(f'{b:02X}' for b in paket.ddata)}")
+
+                                # Module details
+                                b3  = paket.ddata[2]     # time1 hi
+                                b4  = paket.ddata[3]     # time1 lo
+                                b5  = paket.ddata[4]     # Power Up (0=OFF, 1=ON, 2=ASBEFORE, 3=NoChange, 4=ON100% ) 
+                                b6  = paket.ddata[5]     # min
+                                b7  = paket.ddata[6]     # Status update
+                                b10 = paket.ddata[9]    # OUT_OPTION_DELAYED_ON & OUT_OPTION_UP_DOWN_SWAP
+                                b11 = paket.ddata[10]    # Anlaufverzögerung
+                                
+                                _LOGGER.debug(f"OUT_HW_NR_IS_JAL identified: {device_id}")
+
+                                try:
+                                    await register_device_in_registry(
+                                        hass=self._hass,
+                                        entry=self._entry,
+                                        device_id=device_id,
+                                        name = f"CH{b1}_{device_id[3:]}",
+                                        model="Jalousie",
+                                        sw_version="",
+                                        hw_version="",
+                                        device_type="cover",
+                                        via_device=via_device,
+                                        api=self,
+                                        objadr=objadr,
+                                    )
+                                except Exception as e:
+                                    _LOGGER.error(f"Error during registration of COVER device (channel) {device_id}: {e}")
+
+                            # HS-AJ3
+                            # 0F 03 2B 00 03 11 04 00 02 02 04 01 00 50 00 74
+                            
+                            # HS-AR6 
+                            # 0E 1F 00 type:04 EV:00 time1:3C Po:02 FF 01 hi:2C lo:25 invert:00 time2:01 Pu:00 15
+                            # len:0E 1F ch:01 type:04 EV:00 time1:3C Po:02 FF 00 hi:2C lo:26 invert:00 time2:01 Pu:00 15
+                            # len:0E 1F ch:02 type:01 EV:FF time1:FF Po:02 FF 01 hi:2C lo:27 invert:00 time2:01 Pu:00 15
+                            # len:0E 1F ch:03 type:01 EV:FF time1:FF Po:02 FF 00 hi:2C lo:28 invert:00 time2:01 Pu:00 15
+                            # len:0E 1F ch:04 type:04 EV:00 time1:3C Po:02 FF 00 hi:2C lo:29 invert:00 time2:01 Pu:00 15
+                            # len:0E 1F ch:05 type:01 EV:40 time1:04 Po:FF 00 0C hi:00 lo:2C invert:2A time2:00 Pu:01 00
+                          
+
+                            
+                        # Status Info D0_STATUS_INFO
+                        elif b0 == D0_STATUS_INFO:
+                            device_id = f"OBJ{paket.objsrc:05d}"
+                            is_on = paket.ddata[2] == 1
+
+                            _LOGGER.debug(f"STATUS_INFO für {device_id}: {'ON' if is_on else 'OFF'}")
+                            async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_on)
+
+                                                        
         except Exception as e:
             _LOGGER.error(f"Fehler im Listener: {e}")
 
+    async def async_turn_on_switch(self, device_id: str):
+        """Sendet ein EIN-Signal an das angegebene Switch-Device."""
+        try:
+            device = self.devices.get(device_id)
+            if not device:
+                _LOGGER.warning(f"Kein Gerät mit ID {device_id} gefunden")
+                return
 
+            objadr = device.objadr 
+            
+            if not device:
+                _LOGGER.warning(f"Kein Gerät mit ID {device_id} gefunden")
+                return
+                
+            model = device.model
+            
+            if model == "Schalter":
+                await self._packet_sender.send_raw_command(
+                    ipdst=objadr,
+                    ddata=bytes([D0_SET, 0x64, 0x00]),  
+                    objsource=self._objadr,
+                    mi=self._mi,
+                )
+                _LOGGER.debug(f"Schaltbefehl EIN an {device_id} (OBJ={objadr}) gesendet")
+            elif model == "Timer":
+                await self._packet_sender.send_raw_command(
+                    ipdst=objadr,
+                    ddata=bytes([D0_TOGGLE , 0x00, 0x00]),  
+                    objsource=self._objadr,
+                    mi=self._mi,
+                )
+                _LOGGER.debug(f"Schaltbefehl TOGGLE an {device_id} (OBJ={objadr}) gesendet")
+                
+
+        except Exception as e:
+            _LOGGER.error(f"Fehler beim Schalten EIN für {device_id}: {e}")
+
+    async def async_turn_off_switch(self, device_id: str):
+        """Sendet ein AUS-Signal an das angegebene Switch-Device."""
+        try:
+            if not device_id.startswith("OBJ"):
+                _LOGGER.warning(f"Ungültige device_id: {device_id}")
+                return
+
+            device = self.devices.get(device_id)
+            objadr = device.objadr if device else None
+            
+            if objadr is None:
+                _LOGGER.warning(f"Keine objadr für {device_id}")
+                return
+
+            await self._packet_sender.send_raw_command(
+                ipdst=objadr,
+                ddata=bytes([D0_SET, 0x00, 0x00]), 
+                objsource=self._objadr,
+                mi=self._mi,
+            )
+
+            _LOGGER.debug(f"Schaltbefehl AUS an {device_id} (OBJ={objadr}) gesendet")
+
+        except Exception as e:
+            _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
+
+    async def async_request_status(self, device_id: str):
+        try:
+            if not device_id.startswith("OBJ"):
+                _LOGGER.warning(f"Invalid device_id: {device_id} for status request.")
+                return
+
+            device = self.devices.get(device_id)
+            objadr = device.objadr if device else None
+
+            if objadr is None:
+                _LOGGER.warning(f"Missing objadr {device_id}")
+                return
+
+            if device.device_type == "module":
+                _LOGGER.warning(f"No request necessary for {device_id}")
+                return
+
+            await self._packet_sender.send_raw_command(
+                ipdst=objadr,
+                ddata=bytes([D0_REQ, 0x00, 0x00]), 
+                objsource=self._objadr,
+                mi=self._mi,
+            )
+
+            _LOGGER.debug(f"Status request for {device_id} (OBJ={objadr}) sent")
+        except Exception as e:
+            _LOGGER.error(f"Error sending status request for {device_id}: {e}")
+
+
+    async def async_open_cover(self, device_id: str):
+        # Send open signal to net4home device
+        try:
+            if not device_id.startswith("OBJ"):
+                _LOGGER.warning(f"Ungültige device_id: {device_id}")
+                return
+
+            device = self.devices.get(device_id)
+            objadr = device.objadr if device else None
+            
+            if objadr is None:
+                _LOGGER.warning(f"Keine objadr für {device_id}")
+                return
+
+            await self._packet_sender.send_raw_command(
+                ipdst=objadr,
+                ddata=bytes([D0_SET, 0x03, 0x00]), 
+                objsource=self._objadr,
+                mi=self._mi,
+            )
+
+            _LOGGER.debug(f"Schaltbefehl AUF an {device_id} (OBJ={objadr}) gesendet")
+
+        except Exception as e:
+            _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
+
+    async def async_close_cover(self, device_id: str):
+        # Send close signal to net4home device
+        try:
+            if not device_id.startswith("OBJ"):
+                _LOGGER.warning(f"Ungültige device_id: {device_id}")
+                return
+
+            device = self.devices.get(device_id)
+            objadr = device.objadr if device else None
+            
+            if objadr is None:
+                _LOGGER.warning(f"Keine objadr für {device_id}")
+                return
+
+            await self._packet_sender.send_raw_command(
+                ipdst=objadr,
+                ddata=bytes([D0_SET, 0x01, 0x00]), 
+                objsource=self._objadr,
+                mi=self._mi,
+            )
+
+            _LOGGER.debug(f"Schaltbefehl AB an {device_id} (OBJ={objadr}) gesendet")
+
+        except Exception as e:
+            _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
+
+    async def async_stop_cover(self, device_id: str):
+        # Send stop signal to net4home device
+        try:
+            if not device_id.startswith("OBJ"):
+                _LOGGER.warning(f"Ungültige device_id: {device_id}")
+                return
+
+            device = self.devices.get(device_id)
+            objadr = device.objadr if device else None
+            
+            if objadr is None:
+                _LOGGER.warning(f"Keine objadr für {device_id}")
+                return
+
+            await self._packet_sender.send_raw_command(
+                ipdst=objadr,
+                ddata=bytes([D0_SET, 0x00, 0x00]), 
+                objsource=self._objadr,
+                mi=self._mi,
+            )
+
+            _LOGGER.debug(f"Schaltbefehl STOP an {device_id} (OBJ={objadr}) gesendet")
+
+        except Exception as e:
+            _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
+        
+
+
+
+    async def send_enum_all(self):
+        """Send a device discovery to the bus."""
+        try:
+            # ENUM_ALL ist ein Broadcast an MI 0xFFFF (65535), ohne spezifische OBJ-Adresse
+
+            await self._packet_sender.send_raw_command(
+                ipdst=0xFFFF,  # Broadcast
+                ddata=bytes([D0_ENUM_ALL, 0x00, 0x00]),
+                objsource=self._objadr,
+                mi=self._mi,
+            )
+
+            _LOGGER.debug("ENUM_ALL gesendet")
+
+        except Exception as e:
+            _LOGGER.error(f"Fehler beim Senden von ENUM_ALL: {e}")

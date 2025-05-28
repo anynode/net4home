@@ -1,29 +1,42 @@
-from homeassistant import config_entries, core
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import callback
-import voluptuous as vol
-import socket
 import asyncio
 import logging
+import socket
 
-from .const import DOMAIN, N4H_IP_PORT, DEFAULT_MI, DEFAULT_OBJADR, CONF_MI, CONF_OBJADR
-from .api import Net4HomeApi
+import voluptuous as vol
 
-from homeassistant.config_entries import (
-    ConfigEntry,
-    ConfigFlow,
-    ConfigFlowResult,
-    OptionsFlow,
+from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry, OptionsFlowWithConfigEntry
+from homeassistant.core import callback
+
+from .const import (
+    DOMAIN,
+    N4H_IP_PORT,
+    DEFAULT_MI,
+    DEFAULT_OBJADR,
+    CONF_MI,
+    CONF_OBJADR,
 )
+from .api import Net4HomeApi
 
 _LOGGER = logging.getLogger(__name__)
 
-class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
+class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
+    """Config flow for net4home."""
     VERSION = 1
-    
+
     async def async_step_user(self, user_input=None):
         errors = {}
+
+        schema = vol.Schema({
+            vol.Required("host"): str,
+            vol.Required("port", default=N4H_IP_PORT): int,
+            vol.Required("password"): str,
+            vol.Optional(CONF_MI, default=DEFAULT_MI): int,
+            vol.Optional(CONF_OBJADR, default=DEFAULT_OBJADR): int,
+            vol.Optional("discover", default=False): bool,  # <- neue Checkbox
+        })
+
         if user_input is not None:
             client = Net4HomeApi(
                 self.hass,
@@ -36,74 +49,59 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 await client.async_connect()
+
+                if user_input.get("discover"):
+                    await client.send_enum_all()
+                    _LOGGER.info("[net4home] Discover devices wurde im Setup aktiviert → ENUM_ALL gesendet")
+
                 await client.async_disconnect()
+
             except (OSError, socket.gaierror):
                 errors["host"] = "host_not_found"
             except asyncio.TimeoutError:
                 errors["base"] = "timeout"
-            except ConnectionError as ce:
+            except ConnectionError:
                 errors["base"] = "cannot_connect"
             except Exception as ex:
+                _LOGGER.exception("Unbekannter Fehler im ConfigFlow", exc_info=ex)
                 errors["base"] = "unknown"
             else:
+                entry_data = {k: v for k, v in user_input.items() if k != "discover"}
+
                 return self.async_create_entry(
                     title=user_input["host"],
-                    data=user_input,
+                    data=entry_data,
                 )
 
-        schema = vol.Schema({
-            vol.Required("host"): str,
-            vol.Required("port", default=N4H_IP_PORT): int,
-            vol.Required("password"): str,
-            vol.Optional(CONF_MI, default=DEFAULT_MI): int,
-            vol.Optional(CONF_OBJADR, default=DEFAULT_OBJADR): int,
-        })
-
-       
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
             errors=errors,
         )
-        
-        return self.async_show_menu(
-            step_id="user",
-            menu_options=["discovery", "manual"],
-            description_placeholders={
-                "model": "Example model",
-            }
-        )            
-        
-        @staticmethod
-        @callback
-        def async_get_options_flow(
-            config_entry: ConfigEntry,
-        ) -> Net4HomeOptionsFlowHandler:
-            """Get the options flow for net4home"""
-            return Net4HomeOptionsFlowHandler()       
 
-class Net4HomeOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options for Net4Home config flow."""
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> config_entries.OptionsFlow:
+        return Net4HomeOptionsFlowHandler(config_entry)
 
-    #def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-    #    self.config_entry = config_entry
-    #    # Kopie der Geräte aus Optionen für lokale Bearbeitung
-    #    self.devices = list(self.config_entry.options.get("devices", []))
-    
+
+class Net4HomeOptionsFlowHandler(OptionsFlowWithConfigEntry):
+    """Options flow for net4home."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        super().__init__(config_entry)
+        self.devices = dict(config_entry.options.get("devices", {}))
+
     async def async_step_init(self, user_input=None):
         errors = {}
 
-        schema = vol.Schema(
-            {
-                vol.Required("host", default=self.entry.data.get("host")): str,
-                vol.Required("port", default=self.entry.data.get("port", N4H_IP_PORT)): int,
-                vol.Required("password", default=self.entry.data.get("password")): str,
-                vol.Optional(CONF_MI, default=self.entry.data.get(CONF_MI, DEFAULT_MI)): int,
-                vol.Optional(CONF_OBJADR, default=self.entry.data.get(CONF_OBJADR, DEFAULT_OBJADR)): int,
-            #    vol.Optional("device_module_type", default=""): str,
-            #    vol.Optional("device_mi", default=None): int,
-            }
-        )
+        schema = vol.Schema({
+            vol.Required("host", default=self.config_entry.data.get("host")): str,
+            vol.Required("port", default=self.config_entry.data.get("port", N4H_IP_PORT)): int,
+            vol.Required("password", default=self.config_entry.data.get("password")): str,
+            vol.Optional(CONF_MI, default=self.config_entry.data.get(CONF_MI, DEFAULT_MI)): int,
+            vol.Optional(CONF_OBJADR, default=self.config_entry.data.get(CONF_OBJADR, DEFAULT_OBJADR)): int,
+        })
 
         if user_input is not None:
             client = Net4HomeApi(
@@ -125,48 +123,63 @@ class Net4HomeOptionsFlowHandler(config_entries.OptionsFlow):
             except ConnectionError:
                 errors["base"] = "cannot_connect"
             except Exception:
+                _LOGGER.exception("Fehler im OptionsFlow")
                 errors["base"] = "unknown"
             else:
-                return self.async_create_entry(
-                    title=user_input["host"],
-                    data=user_input,
-                )
+                new_options = dict(self.config_entry.options)
+                new_options.update(user_input)
+                self.hass.config_entries.async_update_entry(self.config_entry, options=new_options)
+                return self.async_create_entry(title="", data={})
 
-                #device_mi = user_input.get("device_mi")
-                #device_type = user_input.get("device_module_type")
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["devices"],
+            description_placeholders={"count": str(len(self.devices))},
+        )
 
-                #if device_mi is not None and device_type:
-                #    if any(d.get("mi") == device_mi for d in self.devices):
-                #        errors["device_mi"] = "duplicate_device"
-                #    else:
-                #        self.devices.append({"mi": device_mi, "module_type": device_type})
-                #elif device_mi is not None or device_type:
-                #    errors["base"] = "both_fields_required"
+    async def async_step_devices(self, user_input=None):
+        errors = {}
 
-                #if errors:
-                #    return self.async_show_form(
-                #        step_id="init", data_schema=schema, errors=errors
-                #    )
-                #else:
-                #    options = dict(self.entry.options)
-                #    options["devices"] = self.devices
+        device_choices = {
+            dev_id: f"{info['name']} ({info['device_type']})"
+            for dev_id, info in self.devices.items()
+        }
 
-                #    data = {
-                #        "host": user_input["host"],
-                #        "port": user_input["port"],
-                #        "password": user_input["password"],
-                #        CONF_MI: user_input.get(CONF_MI),
-                #        CONF_OBJADR: user_input.get(CONF_OBJADR),
-                #    }
+        schema = vol.Schema({
+            vol.Optional("delete_device"): vol.In(device_choices),
+            vol.Optional("new_device_id"): str,
+            vol.Optional("new_device_name"): str,
+            vol.Optional("new_device_type"): vol.In(["switch", "sensor", "light", "unknown"]),
+        })
 
-                 #   self.hass.config_entries.async_update_entry(
-                 #       self.entry, data=data, options=options
-                 #   )
-                 #   await self.hass.config_entries.async_reload(self.entry.entry_id)
-                 #   return self.async_create_entry(title="", data={})
+        if user_input is not None:
+            if user_input.get("delete_device"):
+                deleted = user_input["delete_device"]
+                if deleted in self.devices:
+                    del self.devices[deleted]
+                    _LOGGER.info(f"[net4home] Gerät {deleted} gelöscht")
+
+            elif user_input.get("new_device_id") and user_input.get("new_device_type"):
+                dev_id = user_input["new_device_id"]
+                self.devices[dev_id] = {
+                    "device_id": dev_id,
+                    "name": user_input.get("new_device_name", dev_id),
+                    "model": "Manuell",
+                    "device_type": user_input["new_device_type"],
+                    "via_device": None,
+                }
+                _LOGGER.info(f"[net4home] Gerät {dev_id} manuell hinzugefügt")
+
+            new_options = dict(self.config_entry.options)
+            new_options["devices"] = self.devices
+            self.hass.config_entries.async_update_entry(self.config_entry, options=new_options)
+            return self.async_create_entry(title="", data={})
 
         return self.async_show_form(
-            step_id="init",
+            step_id="devices",
             data_schema=schema,
             errors=errors,
-        )    
+            description_placeholders={
+                "count": str(len(self.devices)),
+            }
+        )

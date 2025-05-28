@@ -4,6 +4,7 @@ from typing import NamedTuple
 from typing import Dict, Any
 from .const import (
     D0_SET_IP,
+    D0_GET_TYP,
     D0_ENUM_ALL,
     D0_ACK_TYP,
     D0_ACK,
@@ -231,53 +232,30 @@ class TN4Hpaket(NamedTuple):
 
 
 def n4h_parse(payload_bytes: bytes) -> tuple[str, TN4Hpaket]:
-    payload = payload_bytes.hex()
+    payload = payload_bytes.hex().upper()
     ret = ""
     paket = None
-    
-    if len(payload) < 5:
+
+    if len(payload) < 30:
         return (f"Payload zu kurz für Parsing {len(payload)}", None)
-    
+
     ip = int(payload[2:4] + payload[0:2], 16)
-    ret += f"IP={ip}\t"
-
-    unknown = payload[4:16]
-    ret += f"({unknown})\t"
-
     type8 = int(payload[16:18], 16)
-    ret += f"type8={type8}\t"
-
-    # MI = ipsrc
-    mi_str = payload[18:20] + payload[16:18]
-    ipsrc = int(mi_str, 16)
-    ret += f"MI={mi_str}\t"
-
+    ipsrc = int(payload[18:20] + payload[16:18], 16)
     ipdst = int(payload[22:24] + payload[20:22], 16)
-    ret += f"ipdst={ipdst}\t"
-
     objsrc = int(payload[26:28] + payload[24:26], 16)
-    ret += f"objsrc={objsrc}\t"
-
     datalen = int(payload[28:30], 16)
-    ret += f"datalen={datalen}\t"
 
     ddata_end = 30 + datalen * 2
-    if len(payload) < ddata_end + 8:
-        return ("Payload zu kurz für ddata und Checkbytes", None)
-
     ddata_hex = payload[30:ddata_end]
-    ret += f"ddata={ddata_hex}\t"
-
-    pos = ddata_end
-
-    csRX = int(payload[pos:pos+2], 16)
-    csCalc = int(payload[pos+2:pos+4], 16)
-    length = int(payload[pos+4:pos+6], 16)
-    posb = int(payload[pos+6:pos+8], 16)
-    ret += f"({csRX}/{csCalc}/{length}/{posb})"
-
-    # ddata als Bytes
     ddata_bytes = bytes.fromhex(ddata_hex)
+
+    csRX = csCalc = length = posb = 0
+    if len(payload) >= ddata_end + 8:
+        csRX = int(payload[ddata_end:ddata_end+2], 16)
+        csCalc = int(payload[ddata_end+2:ddata_end+4], 16)
+        length = int(payload[ddata_end+4:ddata_end+6], 16)
+        posb = int(payload[ddata_end+6:ddata_end+8], 16)
 
     paket = TN4Hpaket(
         type8=type8,
@@ -292,39 +270,46 @@ def n4h_parse(payload_bytes: bytes) -> tuple[str, TN4Hpaket]:
         posb=posb,
     )
 
-    if paket is None: 
-        _LOGGER.debug("Paket Payload: %s", payload_bytes.hex())
-    else:
-        log_line = f"OBJ {ipsrc:04X}   {objsrc:05d} >  {ipdst:04X} {datalen:02X} {' '.join(ddata_hex.upper()[i:i+2] for i in range(0, len(ddata_hex), 2)).ljust(45)} {interpret_n4h_sFkt(paket)}"
+    if paket:
+        log_line = f"MI {ipsrc:04X}   {objsrc:05d} >  {ipdst:05d} {datalen:02X} {' '.join(ddata_hex[i:i+2] for i in range(0, len(ddata_hex), 2)).ljust(45)} {interpret_n4h_sFkt(paket)}"
         _LOGGER.debug(log_line)
+    else:
+        _LOGGER.debug("Konnte Paket nicht auflösen: %s", payload)
 
     return ret, paket
 
-def log_parsed_packet(header: bytes, payload: bytes):
-    """Log a parsed packet in a human readable form."""
-    try:
-        # TN4Hpaket-Struktur aus n4h_L2_def.pas:
-        # type8 (1B), ipsrc (2B), ipdest (2B), objsrc (2B), ddatalen (1B), ddata (64B), csRX (1B), csCalc (1B), len (1B), posb (1B)
-        if len(payload) < 8:
-            _LOGGER.warning("Paket zu kurz für Parsing: %s", payload.hex())
-            return
-        type8 = payload[0]
-        ipsrc = int.from_bytes(payload[1:3], "little")
-        ipdest = int.from_bytes(payload[3:5], "little")
-        objsrc = int.from_bytes(payload[5:7], "little")
-        ddatalen = payload[7]
-        ddata = payload[8:8+ddatalen]
-        objdst = ipdest
+def n4h_serialize_packet(paket: TN4Hpaket) -> bytes:
+    """Wandelt TN4Hpaket in ein Byte-Array um."""
+    data = bytearray()
+    data.append(paket.type8)
+    data += paket.ipsrc.to_bytes(2, "big")
+    data += paket.ipdest.to_bytes(2, "big")
+    data += paket.objsrc.to_bytes(2, "big")
+    data.append(paket.ddatalen)
+    data += bytes(paket.ddata[:paket.ddatalen])
+    return data
 
-        mi_str = f"{ipsrc:05d}"
-        objsrc_str = f"{objsrc:05d}"
-        objdst_str = f"{objdst:05d}"
-        objadr_str = f"{objdst:04x}".upper()
-        ddata_str = " ".join(f"{b:02X}" for b in ddata)
-        logstr = f"OBJ {objadr_str}   {mi_str} >  {objdst_str} {type8:02X} {ddata_str}"
-        _LOGGER.info(logstr)
-    except Exception as ex:
-        _LOGGER.error("Fehler beim Paket-Parsing: %s", ex)
+def compress_section(payload_hex: str) -> str:
+    cs = sum(int(payload_hex[i:i+2], 16) for i in range(0, len(payload_hex), 2))
+    length = len(payload_hex) // 2
+    hi = (length >> 8) & 0xFF
+    lo = length & 0xFF
+
+    compressed = f"{hi:02X}{lo:02X}" + payload_hex + "C0"
+    compressed += f"{(cs >> 24) & 0xFF:02X}"
+    compressed += f"{(cs >> 16) & 0xFF:02X}"
+    compressed += f"{(cs >> 8) & 0xFF:02X}"
+    compressed += f"{cs & 0xFF:02X}"
+
+    total_length = len(compressed) // 2
+    return f"{total_length:02X}000000" + compressed
+
+
+def decode_d2b(value: int) -> str:
+    hexval = f"{value:04X}"
+    return hexval[2:4] + hexval[0:2]
+
+
 
 def adr_to_text_obj_grp(padr: bytes) -> str:
     if len(padr) < 2:
@@ -395,6 +380,8 @@ def interpret_n4h_sFkt(paket) -> str:
         sFkt += f"D0_SET_N, {paket.ddata[1]},{paket.ddata[2]}"
     elif b0 == D0_ACK:
         sFkt += "D0_ACK"
+    elif b0 == D0_GET_TYP:
+        sFkt += "D0_GET_TYP"
     elif b0 == D0_NOACK:
         sFkt += "NO_ACK (Error)"
     elif b0 == D0_ACTOR_ACK:
@@ -402,7 +389,12 @@ def interpret_n4h_sFkt(paket) -> str:
     elif b0 == D0_VALUE_ACK:
         sFkt += "D0_VALUE_ACK"
         sFkt += " " + decode_and_print_value_ack(paket.ddata)
+    elif b0 == D0_ENABLE_CONFIGURATION:
+        sFkt += "D0_ENABLE_CONFIGURATION"
     elif b0 == D0_ACK_TYP:
+        # ddata[01] - Modultyp
+        # ddata[10] - Config Enabled
+        
         sFkt += "D0_ACK_TYP "
         sFkt += " " + platine_typ_to_name_a(paket.ddata[1])
         # paket.ddata[10] -> paket.ddata[10] and D10_CONFIG_ENABLE_BIT ) <>0 -> Konfiguration/Betrieb/Factory
@@ -410,6 +402,8 @@ def interpret_n4h_sFkt(paket) -> str:
         sFkt += "D0_RD_ACTOR_DATA"
     elif b0 == D0_RD_ACTOR_DATA_ACK:
         sFkt += "D0_RD_ACTOR_DATA_ACK"
+    elif b0 == D0_GET_SERIAL_REQ:
+        sFkt += "D0_GET_SERIAL_REQ"
     elif b0 == D0_GET_SERIAL_ACK:
         sFkt += "D0_GET_SERIAL_ACK - Serial " + str((paket.ddata[1] << 16) | (paket.ddata[2] << 8) | paket.ddata[3])
     elif b0 == D0_VALUE_REQ:
@@ -425,14 +419,18 @@ def interpret_n4h_sFkt(paket) -> str:
     elif b0 == D0_SET_IP:
         sFkt += "D0_SET_IP"
     elif b0 == D0_SET:
-        # sFkt += f"D0_SET, {paket.ddata[1]},{paket.ddata[2]}"
-        sFkt += f"D0_SET, {paket.ddata[1]},"
+        #sFkt += f"D0_SET, {paket.ddata[1]},{paket.ddata[2]}"
+        sFkt += f"D0_SET {paket.ddata[1]}"
     elif b0 == D0_INC:
         sFkt += "D0_INC"
     elif b0 == D0_DEC:
         sFkt += "D0_DEC"
     elif b0 == D0_ENUM_ALL:
         sFkt += "D0_ENUM_ALL"
+    elif b0 == D0_SET_PROFIL:
+        sFkt += "D0_SET_PROFIL"
+    elif b0 == D0_START_DIM:
+        sFkt += "D0_START_DIM {paket.ddata[1]},{paket.ddata[2]}"
     elif b0 == 255:
         # Paket ins leere
         sFkt += ""
@@ -621,7 +619,7 @@ def decode_and_print_value_ack(paket: bytes) -> str:
         s = "Regen " + s_last_value_ack_text
     elif ddata[1] == IN_HW_NR_IS_HUMIDITY:
         i_analog_value = ddata[3] * 256 + ddata[4]
-        s_last_value_ack_text = f"{i_analog_value} %"
+        s_last_value_ack_text = f"{i_analog_value}%"
         s = "Feuchte/Regen " + s_last_value_ack_text
     elif ddata[1] in [VAL_IS_MIN_TAG_WORD_SA, VAL_IS_MIN_TAG_WORD_SU]:
         i_analog_value = ddata[3] * 256 + ddata[4]
@@ -811,6 +809,17 @@ def AdrToStr2(w: int) -> str:
     if w >= 0x10000:
         return f"MI{w - 0x10000:04X}"
     return adrG_to_text(w)
+
+
+def h2n_adr_as_text(ah, al) -> str:
+    try:
+        ah = int(ah, 16) if isinstance(ah, str) else ah
+        al = int(al, 16) if isinstance(al, str) else al
+    except ValueError:
+        return "??"
+    return AdrToStr(ah * 256 + al)
+
+
 
 def AR_d0_to_ot(d0: int) -> int:
     """
