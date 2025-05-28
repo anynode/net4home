@@ -13,7 +13,7 @@ from .api import Net4HomeApi
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = ["switch", "cover"]
+PLATFORMS: list[Platform] = ["light", "switch", "cover"]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
@@ -56,6 +56,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
                     async_dispatcher_send(hass, f"net4home_new_device_{entry.entry_id}", device)
                     _LOGGER.debug(f"Entity dispatched for {device.device_id}")
                 elif device.device_type == "cover":
+                    async_dispatcher_send(hass, f"net4home_new_device_{entry.entry_id}", device)
+                    _LOGGER.debug(f"Entity dispatched for {device.device_id}")
+                elif device.device_type == "light":
                     async_dispatcher_send(hass, f"net4home_new_device_{entry.entry_id}", device)
                     _LOGGER.debug(f"Entity dispatched for {device.device_id}")
 

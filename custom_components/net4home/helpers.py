@@ -79,6 +79,11 @@ async def register_device_in_registry(
         if api:
             await api.async_request_status(device_id)
 
+    if device_type == "light":
+        _LOGGER.debug(f"Prepare light entity: {device_id}")
+        async_dispatcher_send(hass, f"net4home_new_device_{entry_id}", device)
+        if api:
+            await api.async_request_status(device_id)
 
     try:
         devices = dict(entry.options.get("devices", {}))

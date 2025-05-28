@@ -6,10 +6,10 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.util import slugify
 from homeassistant import config_entries
-from typing import Callable
 
 from .const import DOMAIN
 from .api import Net4HomeApi, Net4HomeDevice
+from typing import Callable
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -42,7 +42,9 @@ from .const import (
     OUT_HW_NR_IS_ONOFF,
     OUT_HW_NR_IS_TIMER,
     OUT_HW_NR_IS_JAL,
+    OUT_HW_NR_IS_DIMMER,
 )
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -189,6 +191,8 @@ class Net4HomeApi:
                     for device in self.devices.values():
                         if device.device_type == "switch":
                             await self.async_request_status(device.device_id)
+                        if device.device_type == "light":
+                            await self.async_request_status(device.device_id)
                     return
             except Exception as e:
                 _LOGGER.error(f"Reconnect fehlgeschlagen (Versuch {attempt}): {e}")
@@ -261,19 +265,28 @@ class Net4HomeApi:
                             device_id = f"OBJ{paket.objsrc:05d}"
 
                             device = self.devices.get(device_id)
+                            
                             if device.device_type == 'switch':
                                 is_on = paket.ddata[2] == 1
                                 _LOGGER.debug(f"STATUS_INFO_ACK für {device_id}: {'ON' if is_on else 'OFF'}")
                                 async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_on)
+                                
                             elif device.device_type == 'timer':
                                 is_on = paket.ddata[2] == 1
                                 _LOGGER.debug(f"STATUS_INFO_ACK für {device_id}: {'ON' if is_on else 'OFF'}")
                                 async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_on)
+                                
                             elif device.device_type == 'cover':
                                 is_closed = paket.ddata[2] != 1 
-                                _LOGGER.debug(f"STATUS_INFO_ACK für {device_id}: {'CLOSED' if is_on else 'OPEN'}")
+                                _LOGGER.debug(f"STATUS_INFO_ACK für {device_id}: {'CLOSED' if is_closed else 'OPEN'}")
                                 async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_closed)
 
+                            elif device.device_type == 'light':
+                                is_on = paket.ddata[2] != 1 
+                                brightness_value = paket.ddata[1]
+                                _LOGGER.debug(f"STATUS_INFO_ACK für {device_id}: {'ON' if is_on else 'OFF'}")
+                                async_dispatcher_send(self._hass,f"net4home_update_{device_id}",{"is_on": is_on, "brightness": brightness_value},
+)
                         elif b0 == D0_RD_ACTOR_DATA_ACK:
                             _LOGGER.debug(f"D0_RD_ACTOR_DATA_ACK identified: {paket.ddata[2]}")
                             
@@ -281,13 +294,24 @@ class Net4HomeApi:
                             b2  = paket.ddata[2]     # actor type
                             b8  = paket.ddata[8]     # OBJ hi
                             b9  = paket.ddata[9]     # OBJ lo
+                            
+                            # 0E 1F 00 01 03 84 02 01 01 3E 1D 00 00 00 19          -> Typ 1-10
+                            
+                            # 10 1F 00 04 00 78 02 23 00 7E 91 00 09 01 1A 00 00    -> HS-AD3e
+                            # 10 1F 01 04 00 78 02 23 00 7E 96 00 09 01 1A 00 00
+                            # 10 1F 02 01 00 00 02 0A 01 7E 9B 00 00 00 1A 00 00
 
                             device_id = f"OBJ{(b8*256+b9):05d}"
                             objadr = (b8 << 8) + b9
                             via_device = f"MI{paket.ipsrc:04x}"
+                            is_dimmer = False
 
+                            device_obj = self.devices.get(via_device)
+                            if device_obj and device_obj.model in ('HS-AD1-1x10V', 'HS-AD3e', 'HS-AD3'):
+                                is_dimmer = True
+                                
                             # We have a classic switch with ON/OFF feature
-                            if b2 == OUT_HW_NR_IS_ONOFF:
+                            if b2 == OUT_HW_NR_IS_ONOFF and not is_dimmer:
                                 _LOGGER.debug(f"OUT_HW_NR_IS_ONOFF identified: {device_id}")
 
                                 # Module details
@@ -318,7 +342,7 @@ class Net4HomeApi:
                                     _LOGGER.error(f"Error during registration of ONOFF device (channel) {device_id}: {e}")
 
                             # We have a classic switch with ON/OFF and the timer feature
-                            if b2 == OUT_HW_NR_IS_TIMER:
+                            if b2 == OUT_HW_NR_IS_TIMER and not is_dimmer:
                                 _LOGGER.debug(f"OUT_HW_NR_IS_TIMER identified: {device_id}")
 
                                 # Module details
@@ -355,13 +379,6 @@ class Net4HomeApi:
                                 _LOGGER.debug(f"OUT_HW_NR_IS_JAL Paket : {' '.join(f'{b:02X}' for b in paket.ddata)}")
 
                                 # Module details
-                                b3  = paket.ddata[2]     # time1 hi
-                                b4  = paket.ddata[3]     # time1 lo
-                                b5  = paket.ddata[4]     # Power Up (0=OFF, 1=ON, 2=ASBEFORE, 3=NoChange, 4=ON100% ) 
-                                b6  = paket.ddata[5]     # min
-                                b7  = paket.ddata[6]     # Status update
-                                b10 = paket.ddata[9]    # OUT_OPTION_DELAYED_ON & OUT_OPTION_UP_DOWN_SWAP
-                                b11 = paket.ddata[10]    # Anlaufverzögerung
                                 
                                 _LOGGER.debug(f"OUT_HW_NR_IS_JAL identified: {device_id}")
 
@@ -382,6 +399,31 @@ class Net4HomeApi:
                                 except Exception as e:
                                     _LOGGER.error(f"Error during registration of COVER device (channel) {device_id}: {e}")
 
+                            if b2 == OUT_HW_NR_IS_ONOFF and is_dimmer:
+
+                                _LOGGER.debug(f"OUT_HW_NR_IS_DIM Paket : {' '.join(f'{b:02X}' for b in paket.ddata)}")
+
+                                # Module details
+                                
+                                _LOGGER.debug(f"OUT_HW_NR_IS_DIMMER identified: {device_id}")
+
+                                try:
+                                    await register_device_in_registry(
+                                        hass=self._hass,
+                                        entry=self._entry,
+                                        device_id=device_id,
+                                        name = f"CH{b1}_{device_id[3:]}",
+                                        model="Dimmer",
+                                        sw_version="",
+                                        hw_version="",
+                                        device_type="light",
+                                        via_device=via_device,
+                                        api=self,
+                                        objadr=objadr,
+                                    )
+                                except Exception as e:
+                                    _LOGGER.error(f"Error during registration of DIMMER device (channel) {device_id}: {e}")
+                                    
                             # HS-AJ3
                             # 0F 03 2B 00 03 11 04 00 02 02 04 01 00 50 00 74
                             
@@ -577,6 +619,43 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
         
+
+    async def async_turn_on_light(self, device_id: str, brightness: int = 100):
+        device = self.devices.get(device_id)
+        if not device:
+            _LOGGER.warning(f"Kein Light-Gerät mit ID {device_id} gefunden")
+            return
+        objadr = device.objadr
+        if objadr is None:
+            _LOGGER.warning(f"Keine objadr für Light {device_id}")
+            return
+
+        await self._packet_sender.send_raw_command(
+            ipdst=objadr,
+            ddata=bytes([D0_SET, brightness, 0x00]),
+            objsource=self._objadr,
+            mi=self._mi,
+        )
+        _LOGGER.debug(f"Schalte Light EIN {device_id} mit Helligkeit {brightness} (OBJ={objadr}) gesendet")
+
+    async def async_turn_off_light(self, device_id: str):
+        device = self.devices.get(device_id)
+        if not device:
+            _LOGGER.warning(f"Kein Light-Gerät mit ID {device_id} gefunden")
+            return
+        objadr = device.objadr
+        if objadr is None:
+            _LOGGER.warning(f"Keine objadr für Light {device_id}")
+            return
+
+        # Beispielbefehl: Ausschalten (je nach Gerät anpassen)
+        await self._packet_sender.send_raw_command(
+            ipdst=objadr,
+            ddata=bytes([D0_SET, 0x00, 0x00]),  # Beispiel OFF-Befehl
+            objsource=self._objadr,
+            mi=self._mi,
+        )
+        _LOGGER.debug(f"Schalte Light AUS {device_id} (OBJ={objadr}) gesendet")
 
 
 
