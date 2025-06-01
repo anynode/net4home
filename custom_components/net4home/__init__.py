@@ -13,7 +13,7 @@ from .api import Net4HomeApi
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = ["light", "switch", "cover"]
+PLATFORMS: list[Platform] = ["light", "switch", "cover", "binary_sensor", "climate", "sensor"]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
@@ -52,13 +52,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
         async def delayed_dispatch():
             await asyncio.sleep(0.1)
             for device in api.devices.values():
+                
                 if device.device_type == "switch":
                     async_dispatcher_send(hass, f"net4home_new_device_{entry.entry_id}", device)
                     _LOGGER.debug(f"Entity dispatched for {device.device_id}")
+                    
                 elif device.device_type == "cover":
                     async_dispatcher_send(hass, f"net4home_new_device_{entry.entry_id}", device)
                     _LOGGER.debug(f"Entity dispatched for {device.device_id}")
+                    
                 elif device.device_type == "light":
+                    async_dispatcher_send(hass, f"net4home_new_device_{entry.entry_id}", device)
+                    _LOGGER.debug(f"Entity dispatched for {device.device_id}")
+
+                elif device.device_type == "climate":
+                    async_dispatcher_send(hass, f"net4home_new_device_{entry.entry_id}", device)
+                    _LOGGER.debug(f"Entity dispatched for {device.device_id}")
+
+                elif device.device_type == "sensor":
+                    async_dispatcher_send(hass, f"net4home_new_device_{entry.entry_id}", device)
+                    _LOGGER.debug(f"Entity dispatched for {device.device_id}")
+
+                elif device.device_type == "binary_sensor":
                     async_dispatcher_send(hass, f"net4home_new_device_{entry.entry_id}", device)
                     _LOGGER.debug(f"Entity dispatched for {device.device_id}")
 
@@ -77,10 +92,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
             if device.device_type == "switch":
                 delay_seconds = idx * 0.2  # 200ms delay
                 asyncio.create_task(delayed_status_request(device.device_id, delay_seconds))
-
-        #unsub = entry.add_update_listener(options_update_listener)
-        #api.unsub_options_update_listener = unsub
-        #entry.async_on_unload(unsub)
 
         # Debug-Service
         async def handle_debug_devices(call):

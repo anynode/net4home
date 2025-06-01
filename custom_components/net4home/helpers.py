@@ -1,22 +1,19 @@
 """Helper functions for net4home device registration and entity creation."""
-import asyncio  
 import logging
-
 from typing import Optional, Set, Tuple
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import DOMAIN
-from .models import Net4HomeDevice  
+from .models import Net4HomeDevice
 
 _LOGGER = logging.getLogger(__name__)
 
 async def register_device_in_registry(
     hass: HomeAssistant,
-    entry,  
+    entry,
     device_id: str,
     name: str,
     model: str,
@@ -27,19 +24,11 @@ async def register_device_in_registry(
     api: Optional[object] = None,
     objadr: Optional[int] = None,
 ) -> None:
-    """Register a device and dispatch a corresponding entity if applicable."""
+    """Register a net4home device and create the corresponding entity."""
     entry_id = entry.entry_id
     device_registry = dr.async_get(hass)
 
-    if api and device_id in api.devices:
-        _LOGGER.debug(f"Device {device_id} already known, looking for changes")
-        existing_device = api.devices[device_id]
-        existing_device.name = name
-        existing_device.device_type = device_type or existing_device.device_type
-        return  
-
-    connections: Set[Tuple[str, str]] = set()
-
+    # Register device with Home Assistant
     device_registry.async_get_or_create(
         config_entry_id=entry_id,
         identifiers={(DOMAIN, device_id)},
@@ -48,43 +37,35 @@ async def register_device_in_registry(
         model=model,
         sw_version=sw_version,
         hw_version=hw_version,
-        connections=connections,
+        connections=set(),
     )
 
-    _LOGGER.info(f"Registered a new device: {device_type} / {device_id}")
+    _LOGGER.info(f"Registered new device: {device_type or 'unknown'} / {device_id}")
 
+    # Register internally
     device = Net4HomeDevice(
         device_id=device_id,
         name=name,
         model=model,
         device_type=device_type or "unknown",
         via_device=via_device,
-        objadr=objadr
+        objadr=objadr,
     )
 
     if api:
         api.devices[device_id] = device
     else:
-        _LOGGER.warning(f"API reference missing – device {device_id} will not be saved")
+        _LOGGER.warning(f"No API reference – device {device_id} not saved to internal registry")
 
-    if device_type == "switch":
-        _LOGGER.debug(f"Prepare switch entity: {device_id}")
+    # Supported entity types
+    known_types = {"switch", "cover", "light", "climate", "binary_sensor"}
+    if device_type in known_types:
+        _LOGGER.debug(f"Dispatching new {device_type} entity for {device_id}")
         async_dispatcher_send(hass, f"net4home_new_device_{entry_id}", device)
         if api:
             await api.async_request_status(device_id)
 
-    if device_type == "cover":
-        _LOGGER.debug(f"Prepare cover entity: {device_id}")
-        async_dispatcher_send(hass, f"net4home_new_device_{entry_id}", device)
-        if api:
-            await api.async_request_status(device_id)
-
-    if device_type == "light":
-        _LOGGER.debug(f"Prepare light entity: {device_id}")
-        async_dispatcher_send(hass, f"net4home_new_device_{entry_id}", device)
-        if api:
-            await api.async_request_status(device_id)
-
+    # Save in config entry options
     try:
         devices = dict(entry.options.get("devices", {}))
         devices[device_id] = {
@@ -95,6 +76,6 @@ async def register_device_in_registry(
             "via_device": device.via_device,
         }
         hass.config_entries.async_update_entry(entry, options={"devices": devices})
-        _LOGGER.debug(f"Device {device_id} permanently saved")
+        _LOGGER.debug(f"Device {device_id} saved to config entry options")
     except Exception as e:
-        _LOGGER.error(f"Error while saving details for device {device_id} in entry.options: {e}")
+        _LOGGER.error(f"Failed to store device {device_id} in config entry options: {e}")

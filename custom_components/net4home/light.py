@@ -16,8 +16,6 @@ from typing import Callable
 
 _LOGGER = logging.getLogger(__name__)
 
-BRIGHTNESS_SCALE = (1, 100)  # Gerätespezifische Helligkeitsskala für ADx Typen
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: config_entries.ConfigEntry,
@@ -58,7 +56,7 @@ class Net4HomeLight(LightEntity):
         self.entry = entry
         self.device = device
         self._is_on = False
-        self._brightness = 100
+        self._brightness = 255
         self._attr_name = device.name
         _LOGGER.debug(f"[Light] Init name={self._attr_name}, device_id={self.device.device_id}, device_type={self.device.device_type}")
 
@@ -73,7 +71,7 @@ class Net4HomeLight(LightEntity):
 
     @property
     def brightness(self) -> int:
-        """Return the brightness of the light (0-255)."""
+        """Return the brightness of the light (0-100)."""
         return self._brightness
     
     @property
@@ -106,13 +104,6 @@ class Net4HomeLight(LightEntity):
         )
 
     @callback
-    def _handle_update(self, is_on: bool):
-        _LOGGER.debug(f"Update für Light {self.device.device_id}: {'EIN' if is_on else 'AUS'}")
-        self._is_on = is_on
-        self._brightness = update_data.get("brightness", self._brightness)
-        self.async_write_ha_state()
-
-    @callback
     def _handle_update(self, update_data):
         if isinstance(update_data, dict):
             self._is_on = update_data.get("is_on", self._is_on)
@@ -130,16 +121,12 @@ class Net4HomeLight(LightEntity):
 
 
     async def async_turn_on(self, **kwargs):
-        brightness_255 = kwargs.get(ATTR_BRIGHTNESS, 255)
-        brightness_pct = round(brightness_255 * 100 / 255)  # 0-100%
-        value_in_range = math.ceil(percentage_to_ranged_value(BRIGHTNESS_SCALE, brightness_pct))
-
-        _LOGGER.debug(f"Schalte Light EIN mit Helligkeit {brightness_pct}: {self.device.device_id}")
-        
-        await self.api.async_turn_on_light(self.device.device_id, brightness=value_in_range)
+        brightness = kwargs.get(ATTR_BRIGHTNESS, 255)
+        _LOGGER.debug(f"Schalte Light EIN mit Helligkeit {brightness}: {self.device.device_id}")
+        await self.api.async_turn_on_light(self.device.device_id, brightness)
 
         self._is_on = True
-        self._brightness = value_in_range
+        self._brightness = brightness
         self.async_write_ha_state()
 
 

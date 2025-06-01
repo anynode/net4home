@@ -22,6 +22,8 @@ from .const import (
     D0_STATUS_INFO,
     D0_RD_ACTOR_DATA,
     D0_RD_ACTOR_DATA_ACK,
+    D0_RD_SENSOR_DATA_ACK,
+    D0_RD_SENSOR_DATA,
     saCYCLIC,
     saACK_REQ,
     saPNR_MASK,
@@ -431,6 +433,14 @@ def interpret_n4h_sFkt(paket) -> str:
         sFkt += "D0_SET_PROFIL"
     elif b0 == D0_START_DIM:
         sFkt += "D0_START_DIM {paket.ddata[1]},{paket.ddata[2]}"
+    elif b0 == D0_RD_SENSOR_DATA:
+        sFkt += "D0_RD_SENSOR_DATA"
+    elif b0 == D0_RD_SENSOR_DATA_ACK:
+        sFkt += "D0_RD_SENSOR_DATA_ACK"
+    elif b0 == D0_RD_MODULSPEC_DATA:
+        sFkt += "D0_RD_MODULSPEC_DATA"
+    elif b0 == D0_RD_MODULSPEC_DATA_ACK:
+        sFkt += "D0_RD_MODULSPEC_DATA_ACK"
     elif b0 == 255:
         # Paket ins leere
         sFkt += ""

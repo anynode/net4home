@@ -4,6 +4,9 @@
 This repository contains the custom component for integrating net4home devices with Home Assistant.
 The net4home integration for Home Assistant allows you to connect to net4home hardware devices.
 
+The integration of net4home in Home Assistant offers an unlimited number of possibilities for automation.  
+The simple integration of an existing installation opens up a wide range of applications in conjunction with devices from other manufacturers.
+
 ## Prerequisites 
 
 The integration requires one net4home Bus connector.
@@ -18,6 +21,20 @@ The `net4home` integration allows connections to more than one Bus connector. Fo
 - Localization support in English, German and Spanish
 - Add modules via the options flow (module type, software version, EE text and MI)
 - Add devices via the options flow (MI and module type)
+
+## Requirements
+
+To ensure stable and flawless functioning, the configuration in the net4home configurator should first be revised. 
+Actually, everything should already be configured correctly. However, experience shows that we have to do a bit of rework here, as people have often retrofitted or adapted something. Over the years, there are certainly some things that can be tidied up with just a few clicks. This is the most important part of a clean integration. Reworking later is very time-consuming.
+Changes to status changes have no influence on the existing functions.
+The **status change** flag must be set for the following actuators. This is important so that the HA always receives information about the current status for display. If, for example, a light is switched by a normal switch, the HA has no information here. There is also the status change, which is communicated to other bus devices.
+The following modules are to be checked:
+- HS-AR6
+- UP-AR2
+- HS-AJ3
+- HS-AJ4-500
+- HS-AD3
+- HS-AD3e
 
 ## Installation
 
@@ -36,7 +53,6 @@ The net4home Bus connector can be auto-discovered by Home Assistant. If an insta
 - Climate
 - Cover
 - Light
-- Scene
 - Sensor
 - Switch
 

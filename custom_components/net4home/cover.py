@@ -46,6 +46,7 @@ async def async_setup_entry(
 
 class Net4HomeCover(CoverEntity):
     _attr_has_entity_name = False
+    _attr_assumed_state = True
 
     def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice):
         self.api = api
