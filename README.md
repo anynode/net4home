@@ -27,7 +27,7 @@ The `net4home` integration allows connections to more than one Bus connector. Fo
 To ensure stable and flawless functioning, the configuration in the net4home configurator should first be revised. 
 
 Actually, everything should already be configured correctly. However, experience shows that we have to do a bit of rework here, as people have often retrofitted or adapted something. Over the years, there are certainly some things that can be tidied up with just a few clicks. This is the most important part of a clean integration. Reworking later is very time-consuming.
-Changes to status changes have no influence on the existing functions.
+> Changes to status changes have no influence on the existing functions.
 
 The **status change** flag must be set for the following actuators. This is important so that the HA always receives information about the current status for display. If, for example, a light is switched by a normal switch, the HA has no information here. There is also the status change, which is communicated to other bus devices.
 
