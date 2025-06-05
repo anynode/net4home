@@ -2,18 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "net4home verbinden",
+        "title": "net4home Bus verbinden",
         "description": "Gib die Verbindungsdaten zum net4home Busconnector ein.",
         "data": {
           "host": "Host",
           "port": "Port (3478)",
           "password": "Passwort",
-          "MI": "MI",
-          "OBJADR": "OBJADR"
+          "MI": "MI (Home Assistant)",
+          "OBJADR": "OBJADR (Home Assistant)",
+          "discover": "Geräte automatisch enumerieren"
         },
-		"data_description": {
-              "MI": "Die MI Adresse von der HA Instanz",
-			  "OBJADR": "Die Absendeadresse der HA Instanz"
+        "data_description": {
+          "MI": "Die MI Adresse von der HA Instanz",
+          "OBJADR": "Die Absendeadresse der HA Instanz"
         }
       }
     },
@@ -23,8 +24,12 @@
       "cannot_connect": "Verbindung konnte nicht hergestellt werden.",
       "unknown": "Unbekannter Fehler."
     }
-  }
-  ,
+  },
+  "sensor": {
+    "targettemp": "Aktueller Sollwert",
+    "presetday": "Vorgabe Tag",
+    "presetnight": "Vorgabe Nacht"
+  },
   "options": {
     "step": {
       "init": {

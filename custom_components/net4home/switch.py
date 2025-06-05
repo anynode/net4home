@@ -53,6 +53,8 @@ class Net4HomeSwitch(SwitchEntity):
         self.device = device
         self._is_on = False
         self._attr_name = device.name
+        self.send_state_changes = False
+        
         _LOGGER.debug(f"[Switch] Init name={self._attr_name}, device_id={self.device.device_id}, device_type={self.device.device_type}")
 
     @property
@@ -81,8 +83,9 @@ class Net4HomeSwitch(SwitchEntity):
             "device_id": self.device.device_id,
             "model": self.device.model,
             "via_device": self.device.via_device or "",
+            "send_state_changes": self.send_state_changes,  
         }
-
+        
     async def async_added_to_hass(self):
         _LOGGER.debug(f"[net4home] async_added_to_hass für {self.device.device_id}")
         self.async_on_remove(

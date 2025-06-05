@@ -23,11 +23,23 @@ async def register_device_in_registry(
     via_device: Optional[str] = None,
     api: Optional[object] = None,
     objadr: Optional[int] = None,
+    send_state_changes: bool = False,
 ) -> None:
+
     """Register a net4home device and create the corresponding entity."""
     entry_id = entry.entry_id
     device_registry = dr.async_get(hass)
 
+    # Check, if the device is already in internal registry object
+    if api and device_id in api.devices:
+        _LOGGER.debug(f"Device {device_id} already registered internally, skipping registration.")
+        return
+        
+    existing_devices = entry.options.get("devices", {})
+    if device_id in existing_devices:
+        _LOGGER.debug(f"Device {device_id} already present in config entry options, skipping registration.")
+        return
+        
     # Register device with Home Assistant
     device_registry.async_get_or_create(
         config_entry_id=entry_id,
@@ -50,6 +62,7 @@ async def register_device_in_registry(
         device_type=device_type or "unknown",
         via_device=via_device,
         objadr=objadr,
+        send_state_changes=send_state_changes,
     )
 
     if api:
@@ -58,7 +71,7 @@ async def register_device_in_registry(
         _LOGGER.warning(f"No API reference – device {device_id} not saved to internal registry")
 
     # Supported entity types
-    known_types = {"switch", "cover", "light", "climate", "binary_sensor"}
+    known_types = {"light", "switch", "cover", "binary_sensor", "climate", "sensor"}
     if device_type in known_types:
         _LOGGER.debug(f"Dispatching new {device_type} entity for {device_id}")
         async_dispatcher_send(hass, f"net4home_new_device_{entry_id}", device)
@@ -74,6 +87,7 @@ async def register_device_in_registry(
             "model": device.model,
             "device_type": device.device_type,
             "via_device": device.via_device,
+            "send_state_changes": send_state_changes,
         }
         hass.config_entries.async_update_entry(entry, options={"devices": devices})
         _LOGGER.debug(f"Device {device_id} saved to config entry options")

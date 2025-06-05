@@ -54,6 +54,8 @@ class Net4HomeCover(CoverEntity):
         self.device = device
         self._is_closed = True
         self._attr_name = device.name
+        self.send_state_changes = False
+
         _LOGGER.debug(f"[Cover] Init name={self._attr_name}, device_id={self.device.device_id}, device_type={self.device.device_type}")
 
     @property
@@ -82,6 +84,8 @@ class Net4HomeCover(CoverEntity):
             "device_id": self.device.device_id,
             "model": self.device.model,
             "via_device": self.device.via_device or "",
+            "send_state_changes": self.send_state_changes,  
+
         }
 
     async def async_added_to_hass(self):

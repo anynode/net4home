@@ -11,6 +11,7 @@ class Net4HomeDevice:
         device_type: str,
         via_device: Optional[str] = None,
         objadr: Optional[int] = None,
+        send_state_changes: bool = False
     ):
         self.device_id = device_id
         self.name = name
@@ -18,3 +19,6 @@ class Net4HomeDevice:
         self.device_type = device_type
         self.via_device = via_device
         self.objadr = objadr
+        self.send_state_changes = send_state_changes
+
+

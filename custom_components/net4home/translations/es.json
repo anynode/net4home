@@ -2,30 +2,39 @@
   "config": {
     "step": {
       "user": {
-        "title": "Conectar net4home",
-        "description": "Introduce los detalles de conexión para el conector de bus de net4home.",
+        "title": "Conectar bus net4home",
+        "description": "Introduce los datos de conexión para el conector del bus net4home.",
         "data": {
           "host": "Host",
           "port": "Puerto (3478)",
           "password": "Contraseña",
-          "MI": "MI",
-          "OBJADR": "OBJADR"
+          "MI": "MI (Home Assistant)",
+          "OBJADR": "OBJADR (Home Assistant)",
+          "discover": "Descubrir dispositivos automáticamente"
+        },
+        "data_description": {
+          "MI": "La dirección MI de la instancia HA",
+          "OBJADR": "La dirección de origen de la instancia HA"
         }
       }
     },
     "error": {
-      "host_not_found": "No se pudo encontrar el conector de bus.",
-      "timeout": "Se agotó el tiempo de conexión o durante el handshake.",
+      "host_not_found": "No se pudo encontrar el conector del bus.",
+      "timeout": "Tiempo de espera agotado durante la conexión o el protocolo de enlace.",
       "cannot_connect": "No se pudo establecer la conexión.",
       "unknown": "Error desconocido."
     }
-  }
-  ,
+  },
+  "sensor": {
+    "targettemp": "Temperatura objetivo",
+    "presetday": "Preajuste día",
+    "presetnight": "Preajuste noche"
+  },
   "options": {
     "step": {
       "init": {
         "title": "Configurar net4home",
-        "description": "Actualiza los detalles de conexión para el conector de bus de net4home.",
+        "description": "Actualiza los datos de conexión para el conector del bus net4home.",
         "data": {
           "host": "Host",
           "port": "Puerto (3478)",
@@ -33,7 +42,7 @@
           "MI": "MI",
           "OBJADR": "OBJADR",
           "module_type": "Tipo de módulo",
-          "software_version": "Versión de software",
+          "software_version": "Versión del software",
           "ee_text": "Texto EE",
           "module_mi": "MI del módulo",
           "device_module_type": "Tipo de módulo del dispositivo",

@@ -1,3 +1,4 @@
+"""Config flow for net4home integration."""
 import asyncio
 import logging
 import socket
@@ -7,6 +8,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, OptionsFlowWithConfigEntry
 from homeassistant.core import callback
+from homeassistant.helpers import device_registry
 
 from .const import (
     DOMAIN,
@@ -16,13 +18,13 @@ from .const import (
     CONF_MI,
     CONF_OBJADR,
 )
+
 from .api import Net4HomeApi
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
-    """Config flow for net4home."""
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
@@ -34,7 +36,7 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required("password"): str,
             vol.Optional(CONF_MI, default=DEFAULT_MI): int,
             vol.Optional(CONF_OBJADR, default=DEFAULT_OBJADR): int,
-            vol.Optional("discover", default=False): bool,  # <- neue Checkbox
+            vol.Optional("discover", default=False): bool,  
         })
 
         if user_input is not None:
@@ -149,7 +151,7 @@ class Net4HomeOptionsFlowHandler(OptionsFlowWithConfigEntry):
             vol.Optional("delete_device"): vol.In(device_choices),
             vol.Optional("new_device_id"): str,
             vol.Optional("new_device_name"): str,
-            vol.Optional("new_device_type"): vol.In(["switch", "sensor", "light", "unknown"]),
+            vol.Optional("new_device_type"): vol.In(["light", "switch", "cover", "binary_sensor", "climate", "sensor", "unknown"]),
         })
 
         if user_input is not None:
@@ -183,3 +185,4 @@ class Net4HomeOptionsFlowHandler(OptionsFlowWithConfigEntry):
                 "count": str(len(self.devices)),
             }
         )
+

@@ -42,12 +42,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
                 device_type=dev["device_type"],
                 via_device=dev.get("via_device"),
                 objadr=dev.get("objadr", int(dev["device_id"][3:]) if dev["device_id"].startswith("OBJ") else None),
+                send_state_changes=dev.get("send_state_changes", False), 
             )
             api.devices[device.device_id] = device
             _LOGGER.debug(f"Loaded device from config: {device.device_id} ({device.device_type})")
 
         hass.data[DOMAIN][entry.entry_id] = api
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+        #diagnostics.async_register_diagnostics(
+        #    hass,
+        #    DOMAIN,
+        #    entry.entry_id,
+        #    async_get_diagnostics
+        #)
 
         async def delayed_dispatch():
             await asyncio.sleep(0.1)
@@ -173,3 +181,36 @@ async def async_unload_entry(hass: HomeAssistant, entry: config_entries.ConfigEn
 
     return unload_ok
 
+
+async def async_get_diagnostics(hass, config_entry):
+    """Return diagnostics for the net4home config entry."""
+    api = hass.data[DOMAIN][config_entry.entry_id]
+
+    if not api:
+        return {}
+
+    # Gather device info and other relevant data
+    devices_info = {}
+    for device_id, device in api.devices.items():
+        devices_info[device_id] = {
+            "name": device.name,
+            "model": device.model,
+            "device_type": device.device_type,
+            "via_device": device.via_device,
+            # add any other info you want to expose
+        }
+
+    data = {
+        "devices": devices_info,
+        "connection_info": {
+            "host": api._host,
+            "port": api._port,
+            "mi": api._mi,
+            "objadr": api._objadr,
+            # any other connection parameters
+        },
+    }
+
+    # redact sensitive info like passwords if present
+    return async_redact_data(data, {"connection_info": ["password"]})
+        

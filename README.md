@@ -15,7 +15,6 @@ The `net4home` integration allows connections to more than one Bus connector. Fo
 
 ## Features
 
-- Auto-discovery via Zeroconf
 - Manual configuration (host, port, bus password, MI, OBJADR)
 - Binary sensors (contact, motion, etc.)
 - Localization support in English, German and Spanish

@@ -441,6 +441,8 @@ def interpret_n4h_sFkt(paket) -> str:
         sFkt += "D0_RD_MODULSPEC_DATA"
     elif b0 == D0_RD_MODULSPEC_DATA_ACK:
         sFkt += "D0_RD_MODULSPEC_DATA_ACK"
+    elif b0 == D0_WR_MODULSPEC_DATA:
+        sFkt += "D0_WR_MODULSPEC_DATA"
     elif b0 == 255:
         # Paket ins leere
         sFkt += ""

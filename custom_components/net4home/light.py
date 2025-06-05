@@ -2,7 +2,8 @@ import logging
 import math
 
 from homeassistant import config_entries
-from homeassistant.components.light import LightEntity, SUPPORT_BRIGHTNESS, ATTR_BRIGHTNESS
+from homeassistant.components.light import LightEntity
+from homeassistant.components.light import ColorMode
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -49,7 +50,7 @@ async def async_setup_entry(
 
 class Net4HomeLight(LightEntity):
     _attr_has_entity_name = False
-    _attr_supported_features = SUPPORT_BRIGHTNESS
+    _supported_color_modes = frozenset({ColorMode.BRIGHTNESS})
     
     def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice):
         self.api = api
@@ -58,6 +59,7 @@ class Net4HomeLight(LightEntity):
         self._is_on = False
         self._brightness = 255
         self._attr_name = device.name
+        self.send_state_changes = False
         _LOGGER.debug(f"[Light] Init name={self._attr_name}, device_id={self.device.device_id}, device_type={self.device.device_type}")
 
     @property
@@ -68,11 +70,19 @@ class Net4HomeLight(LightEntity):
     @property
     def is_on(self) -> bool:
         return self._is_on
-
+  
     @property
     def brightness(self) -> int:
-        """Return the brightness of the light (0-100)."""
-        return self._brightness
+        """Return the brightness of the light (0-255)."""
+        return self._brightness  
+  
+    @property
+    def supported_color_modes(self) -> set[str]:
+        return self._supported_color_modes
+
+    @property
+    def color_mode(self) -> str:
+        return ColorMode.BRIGHTNESS
     
     @property
     def device_info(self) -> DeviceInfo:
@@ -91,7 +101,9 @@ class Net4HomeLight(LightEntity):
             "device_id": self.device.device_id,
             "model": self.device.model,
             "via_device": self.device.via_device or "",
+            "send_state_changes": self.send_state_changes,  
         }
+
 
     async def async_added_to_hass(self):
         _LOGGER.debug(f"[net4home] async_added_to_hass für {self.device.device_id}")
@@ -121,7 +133,11 @@ class Net4HomeLight(LightEntity):
 
 
     async def async_turn_on(self, **kwargs):
-        brightness = kwargs.get(ATTR_BRIGHTNESS, 255)
+        brightness = kwargs.get("brightness", 255)
+        
+        if brightness is None:
+            brightness = 255
+
         _LOGGER.debug(f"Schalte Light EIN mit Helligkeit {brightness}: {self.device.device_id}")
         await self.api.async_turn_on_light(self.device.device_id, brightness)
 

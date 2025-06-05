@@ -2,18 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect net4home",
+        "title": "Connect net4home bus",
         "description": "Enter the connection details for the net4home bus connector.",
         "data": {
           "host": "Host",
           "port": "Port (3478)",
           "password": "Password",
-          "MI": "MI",
-          "OBJADR": "OBJADR"
+          "MI": "MI (Home Assistant)",
+          "OBJADR": "OBJADR (Home Assistant)",
+          "discover": "Automatically discover devices"
         },
-		"data_description": {
-              "MI": "The MI address of the HA instance",
-			  "OBJADR": "The source address of the HA instance"
+        "data_description": {
+          "MI": "The MI address of the HA instance",
+          "OBJADR": "The source address of the HA instance"
         }
       }
     },
@@ -23,8 +24,12 @@
       "cannot_connect": "Could not establish connection.",
       "unknown": "Unknown error."
     }
-  }
-  ,
+  },
+  "sensor": {
+    "targettemp": "Target temperature",
+    "presetday": "Preset day",
+    "presetnight": "Preset night"
+  },
   "options": {
     "step": {
       "init": {
@@ -36,11 +41,11 @@
           "password": "Password",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "module_type": "Module Type",
-          "software_version": "Software Version",
+          "module_type": "Module type",
+          "software_version": "Software version",
           "ee_text": "EE Text",
           "module_mi": "Module MI",
-          "device_module_type": "Device Module Type",
+          "device_module_type": "Device module type",
           "device_mi": "Device MI"
         }
       }
