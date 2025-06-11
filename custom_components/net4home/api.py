@@ -314,8 +314,6 @@ class Net4HomeApi:
                             if not device:
                                 device_id = f"MI{paket.ipsrc:04X}"
                                 device = self.get_known_device(device_id)
-
-                            if not device:
                                 continue
 
                             _LOGGER.debug(f"D0_ACTOR_ACK für *** {device_id}: {device.device_type} - obj {device.objadr} - {paket.objsrc}")
@@ -333,7 +331,10 @@ class Net4HomeApi:
                                     sensor_key = None
 
                                 if sensor_key:
-                                    temp = paket.ddata[2] / 10
+                                    hi = paket.ddata[2]
+                                    lo = paket.ddata[3]
+                                    temp = ((hi << 8) | lo) / 10.0
+                                    temp = hi / 10
                                     _LOGGER.debug(f"D0_ACTOR_ACK für {device_id}: {sensor_key} {temp}")
                                     async_dispatcher_send(self._hass, f"net4home_update_{device_id}", {sensor_key: temp})
                                     async_dispatcher_send(self._hass, f"net4home_update_{device_id}_{sensor_key}", temp)
@@ -524,13 +525,24 @@ class Net4HomeApi:
                             b1  = paket.ddata[1] + 1 # channel
                             b2  = paket.ddata[2]     # actor type (1=ON_CLOSE, 5=ON_SHORT_CLOSE__ON_LONG_CLOSE)
 
-                            offSet1   = 0 +2 + 1
+                            offSet1   = 0 + 2 -1
                             offSet2   = offSet1 + 5
-                            offSet3   = 0 +2 + 1
-                            offSet4   = 0 +2 + 1
+                            offSet3   = 0 + 2 + 1
+                            offSet4   = 0 + 2 + 1
                             offSetAdr = offSet2 + 5
                             
-                            if offSetAdr is None or offSetAdr + 1 >= len(paket.ddata):
+                            # Hier kommen noch mehr Optionen für andere Typen 
+                            # 1 - ON_CLOSE (Nur Schließen)
+                            # 5 - 2. Funktion  - ON_SHORT_CLOSE__ON_LONG_CLOSE (Kurz/Lang)
+                            
+                            if paket.ddata[2] == 1:
+                                offSetAdr = offSetAdr
+                            elif paket.ddata[2] == 5: 
+                                offSetAdr = offSetAdr + 2
+                            else:
+                                continue
+
+                            if offSetAdr is None or offSetAdr+1 >= len(paket.ddata):
                                 _LOGGER.error(f"Invalid offSetAdr or paket.ddata too short: offSetAdr={offSetAdr}, len={len(paket.ddata)}")
                                 continue
     
@@ -549,12 +561,12 @@ class Net4HomeApi:
 #  EE_NCNO_INV                     = EE_OFFSET_TIMER     + 2;
 #  EE_OFFSET_FKT3                  = EE_NCNO_INV         + 1;
 #  EE_OFFSET_FKT4                  = EE_OFFSET_FKT3      + 5;
-                            device_id = f"OBJ{(offSetAdr*256 + offSetAdr + 1):05d}"
-                            objadr = (offSetAdr << 8) + (offSetAdr + 1)
-                            
+                            device_id = f"OBJ{(paket.ddata[offSetAdr]*256 + paket.ddata[offSetAdr+1]):05d}"
+                            objadr = (paket.ddata[offSetAdr]*256 + paket.ddata[offSetAdr+1])
+                          
                             via_device = f"MI{paket.ipsrc:04X}"
                             device_obj = self.devices.get(via_device)
-                            _LOGGER.debug(f"D0_RD_SENSOR_DATA_ACK identified: model: {device_obj.model} - {via_device} - {objadr}")
+                            _LOGGER.debug(f"D0_RD_SENSOR_DATA_ACK identified: model: device_id:{device_id} - {device_obj.model} - {via_device} - {objadr}")
 
                             if device_obj and device_obj.model in ('UP-S4'):
                                 is_sensor = True
@@ -580,7 +592,20 @@ class Net4HomeApi:
                                     _LOGGER.error(f"Error during registration of SENSOR device (channel) {device_id}: {e}")
 
 
+                        elif b0 == D0_SENSOR_ACK:
+                            _LOGGER.debug(f"D0_SENSOR_ACK identified: Typ: {paket.ddata[1]} - {' '.join(f'{b:02X}' for b in paket.ddata)}")
+                            device_id = f"OBJ{paket.objsrc:05d}"
+                            device = self.devices.get(device_id)
+
+                            if not device:
+                                continue
                             
+                            is_on = paket.ddata[2] == 1
+
+                            _LOGGER.debug(f"D0_ACTOR_ACK für {device_id}: {is_on}")
+                            async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_on)
+                            
+                        
                         elif b0 == D0_RD_MODULSPEC_DATA_ACK:
                             _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK identified: Typ: {paket.ddata[1]} - {' '.join(f'{b:02X}' for b in paket.ddata)}")
 
@@ -726,6 +751,15 @@ class Net4HomeApi:
                                 _LOGGER.debug(f"STATUS_INFO für {device_id}: {'ON' if is_on else 'OFF'}")
                                 async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_on)
 
+                        elif b0 in {"D0_SET", "D0_INC", "D0_DEC", "D0_TOGGLE"}:
+                            device_id = f"OBJ{paket.objsrc:05d}"
+                            device = self.devices.get(device_id)
+
+                            if not device:
+                                continue
+
+                            _LOGGER.debug(f"D0_xxx für {device_id} – Befehl: {paket.ddata[0]}")
+                            
                                                         
         except Exception as e:
             _LOGGER.error(f"Fehler im Listener: {e}")
@@ -995,14 +1029,20 @@ class Net4HomeApi:
 
 
     async def async_set_temperature(self, device_id: str, temperature: float):
+        """Send target temperature to net4home bus."""
         objadr = self.devices[device_id].objadr
-        temp_val = round(temperature)
+        temp_val = int(round(temperature * 10))  # z.B. 22.5°C ➜ 225
+        hi = (temp_val >> 8) & 0xFF
+        lo = temp_val & 0xFF
+
         await self._packet_sender.send_raw_command(
             ipdst=objadr,
-            ddata=bytes([D0_SET, temp_val, 0x00]),
+            ddata=bytes([D0_SET, hi, lo]),
             objsource=self._objadr,
             mi=self._mi,
         )
-        _LOGGER.debug(f"Set target temperature {temp_val}°C for {device_id} (OBJ={objadr})")
-
+        _LOGGER.debug(
+            f"Set target temperature {temperature:.1f}°C "
+            f"(raw={temp_val}, hi=0x{hi:02X}, lo=0x{lo:02X}) for {device_id} (OBJ={objadr})"
+        )
 
