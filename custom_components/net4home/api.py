@@ -7,6 +7,7 @@ import time
 
 from typing import Optional
 
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.device_registry import DeviceInfo
 
@@ -145,15 +146,15 @@ class N4HPacketSender:
 class Net4HomeApi:
     def __init__(
         self,
-        hass,
-        host,
+        hass: HomeAssistant,
+        host: str,
         port: int = N4H_IP_PORT,
         password: str = "",
         mi: int = DEFAULT_MI,
         objadr: int = DEFAULT_OBJADR,
         entry_id: Optional[str] = None,
         entry=None,  
-    ):
+    ) -> None:
         self._hass = hass
         self._entry_id = entry_id
         self._host = host
@@ -167,11 +168,13 @@ class Net4HomeApi:
         self._packet_sender: Optional[N4HPacketSender] = None
         self.devices: dict[str, Net4HomeDevice] = {}
         self._entry = entry
+        self._listen_task: Optional[asyncio.Task] = None
+        self._connected = False
        
 
-    async def async_connect(self):
-
+    async def async_connect(self) -> None:
         self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
+        self._connected = True
         _LOGGER.info(f"Connect with net4home Bus connector at {self._host}:{self._port}")
 
         packet_bytes = binascii.unhexlify(
@@ -209,13 +212,30 @@ class Net4HomeApi:
         _LOGGER.error("Maximale Reconnect-Versuche erreicht. Keine Verbindung zum Bus möglich.")
 
 
-    async def async_disconnect(self):
+    async def async_disconnect(self) -> None:
+        """Close connection to net4home Bus connector."""
+        self._connected = False
         if self._writer:
             self._writer.close()
             await self._writer.wait_closed()
-            _LOGGER.debug("Connection to net4home Bus connector closed")
+        if self._reader:
+            self._reader = None
+        self._writer = None
+        self._packet_sender = None
+        _LOGGER.debug("Connection to net4home Bus connector closed")
 
-    async def async_listen(self):
+    async def async_stop(self) -> None:
+        """Stop the listening task."""
+        if self._listen_task:
+            self._listen_task.cancel()
+            try:
+                await self._listen_task
+            except asyncio.CancelledError:
+                pass
+            self._listen_task = None
+            _LOGGER.debug("Listen task stopped")
+
+    async def async_listen(self) -> None:
         _LOGGER.debug("Start listening for bus packets")
         try:
             while True:
@@ -229,6 +249,9 @@ class Net4HomeApi:
                     _LOGGER.error(f"Network error: {e}")
                     await self.async_reconnect()
                     continue
+                except asyncio.CancelledError:
+                    _LOGGER.debug("Listen task cancelled during read")
+                    raise
                 packets = self._packet_receiver.receive_raw_command(data)
                 for ptype, payload in packets:
                     try:
@@ -760,12 +783,19 @@ class Net4HomeApi:
 
                             _LOGGER.debug(f"D0_xxx für {device_id} – Befehl: {paket.ddata[0]}")
                             
-                                                        
+        except asyncio.CancelledError:
+            _LOGGER.debug("Listen task cancelled")
+            raise
+        except (ConnectionResetError, OSError, asyncio.TimeoutError) as e:
+            _LOGGER.error(f"Network error in listen loop: {e}")
         except Exception as e:
-            _LOGGER.error(f"Fehler im Listener: {e}")
+            _LOGGER.exception(f"Unexpected error in listen loop: {e}")
 
-    async def async_turn_on_switch(self, device_id: str):
+    async def async_turn_on_switch(self, device_id: str) -> None:
         """Sendet ein EIN-Signal an das angegebene Switch-Device."""
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
+            return
         try:
             device = self.devices.get(device_id)
             if not device:
@@ -801,8 +831,11 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Fehler beim Schalten EIN für {device_id}: {e}")
 
-    async def async_turn_off_switch(self, device_id: str):
+    async def async_turn_off_switch(self, device_id: str) -> None:
         """Sendet ein AUS-Signal an das angegebene Switch-Device."""
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
+            return
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Ungültige device_id: {device_id}")
@@ -827,7 +860,10 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
 
-    async def async_request_status(self, device_id: str):
+    async def async_request_status(self, device_id: str) -> None:
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot request status for {device_id}")
+            return
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Invalid device_id: {device_id} for status request.")
@@ -856,8 +892,11 @@ class Net4HomeApi:
             _LOGGER.error(f"Error sending status request for {device_id}: {e}")
 
 
-    async def async_open_cover(self, device_id: str):
+    async def async_open_cover(self, device_id: str) -> None:
         # Send open signal to net4home device
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
+            return
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Ungültige device_id: {device_id}")
@@ -882,8 +921,11 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
 
-    async def async_close_cover(self, device_id: str):
+    async def async_close_cover(self, device_id: str) -> None:
         # Send close signal to net4home device
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
+            return
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Ungültige device_id: {device_id}")
@@ -908,8 +950,11 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
 
-    async def async_stop_cover(self, device_id: str):
+    async def async_stop_cover(self, device_id: str) -> None:
         # Send stop signal to net4home device
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
+            return
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Ungültige device_id: {device_id}")
@@ -935,7 +980,10 @@ class Net4HomeApi:
             _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
         
 
-    async def async_turn_on_light(self, device_id: str, brightness: int = 255):
+    async def async_turn_on_light(self, device_id: str, brightness: int = 255) -> None:
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
+            return
         device = self.devices.get(device_id)
         if not device:
             _LOGGER.warning(f"Kein Light-Gerät mit ID {device_id} gefunden")
@@ -953,7 +1001,10 @@ class Net4HomeApi:
         )
         _LOGGER.debug(f"Schalte Light EIN {device_id} mit Helligkeit {brightness100} (OBJ={objadr}) gesendet")
 
-    async def async_turn_off_light(self, device_id: str):
+    async def async_turn_off_light(self, device_id: str) -> None:
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
+            return
         device = self.devices.get(device_id)
         if not device:
             _LOGGER.warning(f"Kein Light-Gerät mit ID {device_id} gefunden")
@@ -974,8 +1025,11 @@ class Net4HomeApi:
 
 
 
-    async def send_enum_all(self):
+    async def send_enum_all(self) -> None:
         """Send a device discovery to the bus."""
+        if not self._connected:
+            _LOGGER.warning("Not connected, cannot send ENUM_ALL")
+            return
         try:
             # ENUM_ALL ist ein Broadcast an MI 0xFFFF (65535), ohne spezifische OBJ-Adresse
 
@@ -997,8 +1051,11 @@ class Net4HomeApi:
             _LOGGER.warning(f"Unbekanntes Gerät: {device_id}")
         return device
 
-    async def async_set_climate_mode(self, device_id: str, hvac_mode: str, target_temp: float = None):
+    async def async_set_climate_mode(self, device_id: str, hvac_mode: str, target_temp: float = None) -> None:
         """Set climate mode with bits: bit0 = Heat ON, bit1 = Cool ON, plus target temperature as single byte (temp * 10)."""
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
+            return
         objadr = self.devices[device_id].objadr
         mode_byte = 0
 
@@ -1028,8 +1085,11 @@ class Net4HomeApi:
         _LOGGER.debug(f"Set climate mode {hvac_mode} (byte={mode_byte:02X}), target_temp={target_temp} ({temp_byte}) for {device_id} (OBJ={objadr})")
 
 
-    async def async_set_temperature(self, device_id: str, temperature: float):
+    async def async_set_temperature(self, device_id: str, temperature: float) -> None:
         """Send target temperature to net4home bus."""
+        if not self._connected:
+            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
+            return
         objadr = self.devices[device_id].objadr
         temp_val = int(round(temperature * 10))  # z.B. 22.5°C ➜ 225
         hi = (temp_val >> 8) & 0xFF
