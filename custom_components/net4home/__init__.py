@@ -6,6 +6,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant import config_entries
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.redact import redact_sensitive_data
 
 from .models import Net4HomeDevice
 from .const import DOMAIN
@@ -48,6 +49,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
             _LOGGER.debug(f"Loaded device from config: {device.device_id} ({device.device_type})")
 
         hass.data[DOMAIN][entry.entry_id] = api
+        
+        # Register options update listener
+        entry.async_on_unload(
+            entry.add_update_listener(options_update_listener1)
+        )
+        
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
         #diagnostics.async_register_diagnostics(
@@ -90,7 +97,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
         _LOGGER.debug(f"List of loaded devices: {list(api.devices.keys())}")
 
         await api.async_connect()
-        asyncio.create_task(api.async_listen())
+        api._listen_task = asyncio.create_task(api.async_listen())
 
         async def delayed_status_request(device_id: str, delay: float):
             await asyncio.sleep(delay)
@@ -167,6 +174,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: config_entries.ConfigEn
     )
 
     if unload_ok:
+        # Unregister services
+        hass.services.async_remove(DOMAIN, "debug_devices")
+        hass.services.async_remove(DOMAIN, "clear_devices")
+        hass.services.async_remove(DOMAIN, "enum_all")
+        
         skip_disconnect = hass.data[DOMAIN].pop("skip_disconnect", False)
         hub: Net4HomeApi = hass.data[DOMAIN].pop(entry.entry_id)
 
@@ -212,5 +224,5 @@ async def async_get_diagnostics(hass, config_entry):
     }
 
     # redact sensitive info like passwords if present
-    return async_redact_data(data, {"connection_info": ["password"]})
+    return redact_sensitive_data(data, {"connection_info": ["password"]})
         
