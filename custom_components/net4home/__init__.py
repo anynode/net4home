@@ -6,7 +6,6 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant import config_entries
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.redact import redact_sensitive_data
 
 from .models import Net4HomeDevice
 from .const import DOMAIN
@@ -194,6 +193,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: config_entries.ConfigEn
     return unload_ok
 
 
+def _redact_sensitive_data(data: dict, keys_to_redact: dict) -> dict:
+    """Redact sensitive data from diagnostics."""
+    result = data.copy()
+    for key, subkeys in keys_to_redact.items():
+        if key in result:
+            if isinstance(result[key], dict):
+                result[key] = result[key].copy()
+                for subkey in subkeys:
+                    if subkey in result[key]:
+                        result[key][subkey] = "**REDACTED**"
+    return result
+
+
 async def async_get_diagnostics(hass, config_entry):
     """Return diagnostics for the net4home config entry."""
     api = hass.data[DOMAIN][config_entry.entry_id]
@@ -224,5 +236,5 @@ async def async_get_diagnostics(hass, config_entry):
     }
 
     # redact sensitive info like passwords if present
-    return redact_sensitive_data(data, {"connection_info": ["password"]})
+    return _redact_sensitive_data(data, {"connection_info": ["password"]})
         
