@@ -1,7 +1,3 @@
-import logging
-import math
-
-from homeassistant import config_entries
 from homeassistant.components.light import LightEntity
 from homeassistant.components.light import ColorMode
 from homeassistant.core import HomeAssistant, callback
@@ -10,10 +6,15 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.util.color import value_to_brightness
 from homeassistant.util.percentage import percentage_to_ranged_value
 from homeassistant.util import slugify
+from homeassistant import config_entries
+from typing import Callable
 
+from .diagnostic_sensor import Net4HomeSendStateChangesDiagnosticSensor
 from .const import DOMAIN
 from .api import Net4HomeApi, Net4HomeDevice
-from typing import Callable
+
+import logging
+import math
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,24 +23,29 @@ async def async_setup_entry(
     entry: config_entries.ConfigEntry,
     async_add_entities: Callable[[list[LightEntity], bool], None]
 ) -> None:
-    """Set up net4home light entities."""
     api: Net4HomeApi = hass.data[DOMAIN][entry.entry_id]
-
-    _LOGGER.debug(f"Starting setup_entry with {len(api.devices)} known devices")
-    for d in api.devices.values():
-        _LOGGER.debug(f"→ {d.device_id} ({d.device_type})")
 
     entities = [
         Net4HomeLight(api, entry, device)
         for device in api.devices.values()
         if device.device_type == "light"
     ]
-    async_add_entities(entities, True)
+
+    diagnostic_entities = [
+        Net4HomeSendStateChangesDiagnosticSensor(entry, device)
+        for device in api.devices.values()
+        if device.device_type == "light"
+    ]
+
+    async_add_entities(entities + diagnostic_entities, True)
 
     async def async_new_device(device: Net4HomeDevice):
         if device.device_type != "light":
             return
-        async_add_entities([Net4HomeLight(api, entry, device)])
+        async_add_entities([
+            Net4HomeLight(api, entry, device),
+            Net4HomeSendStateChangesDiagnosticSensor(entry, device)
+        ])
 
     entry.async_on_unload(
         async_dispatcher_connect(

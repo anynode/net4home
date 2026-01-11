@@ -1,6 +1,7 @@
 # custom_components/net4home/models.py
 
 from typing import Optional
+from typing import NamedTuple
 
 class Net4HomeDevice:
     def __init__(
@@ -11,7 +12,8 @@ class Net4HomeDevice:
         device_type: str,
         via_device: Optional[str] = None,
         objadr: Optional[int] = None,
-        send_state_changes: bool = False
+        send_state_changes: bool = False,
+        inverted: Optional[bool] = False         
     ):
         self.device_id = device_id
         self.name = name
@@ -20,5 +22,17 @@ class Net4HomeDevice:
         self.via_device = via_device
         self.objadr = objadr
         self.send_state_changes = send_state_changes
+        self.inverted = inverted
 
 
+class TN4Hpaket(NamedTuple):
+    type8: int
+    ipsrc: int
+    ipdest: int
+    objsrc: int
+    ddatalen: int
+    ddata: bytes
+    csRX: int
+    csCalc: int
+    length: int
+    posb: int

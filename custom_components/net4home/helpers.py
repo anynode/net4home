@@ -24,22 +24,46 @@ async def register_device_in_registry(
     api: Optional[object] = None,
     objadr: Optional[int] = None,
     send_state_changes: bool = False,
+    inverted: Optional[bool] = False,
 ) -> None:
-
     """Register a net4home device and create the corresponding entity."""
     entry_id = entry.entry_id
     device_registry = dr.async_get(hass)
+    existing_devices = entry.options.get("devices", {})   # <--- GANZ OBEN!
 
     # Check, if the device is already in internal registry object
-    if api and device_id in api.devices:
-        _LOGGER.debug(f"Device {device_id} already registered internally, skipping registration.")
-        return
-        
-    existing_devices = entry.options.get("devices", {})
+    # if api and device_id in api.devices:
+    #    _LOGGER.debug(f"Device {device_id} already registered internally, skipping registration.")
+    #    return
+
     if device_id in existing_devices:
-        _LOGGER.debug(f"Device {device_id} already present in config entry options, skipping registration.")
+        # Device already exists, check for changes
+        updated = False
+        current = existing_devices[device_id]
+        new_config = {
+            "device_id": device_id,
+            "name": name,
+            "model": model,
+            "device_type": device_type or "unknown",
+            "via_device": via_device,
+            "send_state_changes": send_state_changes,
+            "inverted": inverted,
+        }
+        # Compare all fields that might change
+        for key, val in new_config.items():
+            if current.get(key) != val:
+                updated = True
+                current[key] = val  # Update the changed field
+
+        if updated:
+            devices = dict(existing_devices)
+            devices[device_id] = current
+            hass.config_entries.async_update_entry(entry, options={"devices": devices})
+            _LOGGER.info(f"Updated config for device {device_id} (e.g., inverted={inverted}) in config entry options")
+        else:
+            _LOGGER.debug(f"Device {device_id} already present and up-to-date in config entry options.")
         return
-        
+
     # Register device with Home Assistant
     device_registry.async_get_or_create(
         config_entry_id=entry_id,
@@ -63,6 +87,7 @@ async def register_device_in_registry(
         via_device=via_device,
         objadr=objadr,
         send_state_changes=send_state_changes,
+        inverted=inverted,
     )
 
     if api:
@@ -88,8 +113,10 @@ async def register_device_in_registry(
             "device_type": device.device_type,
             "via_device": device.via_device,
             "send_state_changes": send_state_changes,
+            "inverted": device.inverted,
         }
         hass.config_entries.async_update_entry(entry, options={"devices": devices})
         _LOGGER.debug(f"Device {device_id} saved to config entry options")
     except Exception as e:
         _LOGGER.error(f"Failed to store device {device_id} in config entry options: {e}")
+

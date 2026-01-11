@@ -1,7 +1,11 @@
 import logging
 import asyncio
 from typing import NamedTuple
+from typing import Tuple, Optional
 from typing import Dict, Any
+from .models import TN4Hpaket
+
+
 from .const import (
     D0_SET_IP,
     D0_GET_TYP,
@@ -232,64 +236,84 @@ class TN4Hpaket(NamedTuple):
     length: int         # byte
     posb: int           # byte
 
-
-def n4h_parse(payload_bytes: bytes) -> tuple[str, TN4Hpaket]:
-    payload = payload_bytes.hex().upper()
+def n4h_parse(payload: bytes) -> tuple[str, Optional[TN4Hpaket]]:
     ret = ""
     paket = None
 
-    if len(payload) < 30:
-        return (f"Payload zu kurz für Parsing {len(payload)}", None)
+    if len(payload) < 8:
+        _LOGGER.warning("Paket zu kurz (weniger als 8 Bytes für Header)")
+        return "Paket zu kurz", None
 
-    ip = int(payload[2:4] + payload[0:2], 16)
-    type8 = int(payload[16:18], 16)
-    ipsrc = int(payload[18:20] + payload[16:18], 16)
-    ipdst = int(payload[22:24] + payload[20:22], 16)
-    objsrc = int(payload[26:28] + payload[24:26], 16)
-    datalen = int(payload[28:30], 16)
+    IP_HEADER_LEN = 8
+    header_bytes = payload[:IP_HEADER_LEN]
+    result = payload[IP_HEADER_LEN:]
 
-    ddata_end = 30 + datalen * 2
-    ddata_hex = payload[30:ddata_end]
-    ddata_bytes = bytes.fromhex(ddata_hex)
+    if len(result) < 9:
+        _LOGGER.warning("Payload zu kurz für Paketstruktur (<9 Bytes)")
+        return "Payload zu kurz für Paketstruktur", None
 
-    csRX = csCalc = length = posb = 0
-    if len(payload) >= ddata_end + 8:
-        csRX = int(payload[ddata_end:ddata_end+2], 16)
-        csCalc = int(payload[ddata_end+2:ddata_end+4], 16)
-        length = int(payload[ddata_end+4:ddata_end+6], 16)
-        posb = int(payload[ddata_end+6:ddata_end+8], 16)
+    try:
+        type8 = result[0]
+        ipsrc = int.from_bytes(result[2:4], 'little')
+        ipdest = int.from_bytes(result[4:6], 'little')
+        objsrc = int.from_bytes(result[6:8], 'little')
+        ddatalen = result[8]
+        ddata = result[9:9 + ddatalen]
 
-    paket = TN4Hpaket(
-        type8=type8,
-        ipsrc=ipsrc,
-        ipdest=ipdst,
-        objsrc=objsrc,
-        ddatalen=datalen,
-        ddata=ddata_bytes,
-        csRX=csRX,
-        csCalc=csCalc,
-        length=length,
-        posb=posb,
-    )
+        paket = TN4Hpaket(
+            type8=type8,
+            ipsrc=ipsrc,
+            ipdest=ipdest,
+            objsrc=objsrc,
+            ddatalen=len(ddata),
+            ddata=ddata,
+            csRX=0,
+            csCalc=0,
+            length=0,
+            posb=0,
+        )
 
-    if paket:
-        log_line = f"MI {ipsrc:04X}   {objsrc:05d} >  {ipdst:05d} {datalen:02X} {' '.join(ddata_hex[i:i+2] for i in range(0, len(ddata_hex), 2)).ljust(45)} {interpret_n4h_sFkt(paket)}"
+        ddata_list = paket.ddata[:paket.ddatalen]
+        
+        if len(ddata_list) > 15:
+            ddata_hex = ' '.join(f"{b:02X}" for b in ddata_list[:15]) + " ..."
+        else:
+            ddata_hex = ' '.join(f"{b:02X}" for b in ddata_list)
+            ddata_hex = ddata_hex.ljust(49)  # 20 * 2 chars + 19 spaces = 59
+
+        ziel = "Broadcast" if paket.ipdest == 0x7FFF else f"Ziel {paket.ipdest}"
+        sFkt = interpret_n4h_sFkt(paket)
+        befehl = sFkt.split(' ')[0] if sFkt else "Unbekannt"
+
+        log_line = (
+            f"Modul-Absender (MI{paket.ipsrc:04X})\t"
+            f"Absender {paket.objsrc:05d}\t"
+            f"{ziel}\t"
+            f"Daten {ddata_hex}\t"
+            f"{sFkt}"
+        )
         _LOGGER.debug(log_line)
-    else:
-        _LOGGER.debug("Konnte Paket nicht auflösen: %s", payload)
+
+
+
+    except Exception as e:
+        _LOGGER.exception("Fehler beim Parsen des Pakets: %s", e)
+        return "Fehler beim Parsen des Pakets", None
 
     return ret, paket
 
-def n4h_serialize_packet(paket: TN4Hpaket) -> bytes:
-    """Wandelt TN4Hpaket in ein Byte-Array um."""
-    data = bytearray()
-    data.append(paket.type8)
-    data += paket.ipsrc.to_bytes(2, "big")
-    data += paket.ipdest.to_bytes(2, "big")
-    data += paket.objsrc.to_bytes(2, "big")
-    data.append(paket.ddatalen)
-    data += bytes(paket.ddata[:paket.ddatalen])
-    return data
+
+def hex_lines(b: bytes) -> str:
+    h = b.hex().upper()
+    return " ".join(" ".join(h[i:i+2] for i in range(p, min(p+32, len(h)), 2)) for p in range(0, len(h), 32))
+
+
+class DecompressionError(Exception):
+    def __init__(self, code: int, detail: int):
+        super().__init__(f"Decompression error {code}, detail: {detail}")
+        self.code = code
+        self.detail = detail
+
 
 def compress_section(payload_hex: str) -> str:
     cs = sum(int(payload_hex[i:i+2], 16) for i in range(0, len(payload_hex), 2))
@@ -306,11 +330,21 @@ def compress_section(payload_hex: str) -> str:
     total_length = len(compressed) // 2
     return f"{total_length:02X}000000" + compressed
 
+def n4h_serialize_packet(paket: TN4Hpaket) -> bytes:
+    """Wandelt TN4Hpaket in ein Byte-Array um."""
+    data = bytearray()
+    data.append(paket.type8)
+    data += paket.ipsrc.to_bytes(2, "big")
+    data += paket.ipdest.to_bytes(2, "big")
+    data += paket.objsrc.to_bytes(2, "big")
+    data.append(paket.ddatalen)
+    data += bytes(paket.ddata[:paket.ddatalen])
+    return data
+
 
 def decode_d2b(value: int) -> str:
     hexval = f"{value:04X}"
     return hexval[2:4] + hexval[0:2]
-
 
 
 def adr_to_text_obj_grp(padr: bytes) -> str:
@@ -354,7 +388,10 @@ def text_to_adr_gruppe(s: str) -> int:
 def interpret_n4h_sFkt(paket) -> str:
 
     sFkt = ""
-
+    
+    if not isinstance(paket, TN4Hpaket):
+        return "<invalid paket>"
+    
     if paket.ddatalen == 0:
         return "keine Daten"
 
@@ -863,4 +900,35 @@ def AD_d0_to_ot(d0: int) -> int:
     if d0 == OUT_HW_NR_IS_TIMER:
         return OT_ADT
     return OT_NO
+
+def get_function_and_address_count(pin_typ: int) -> tuple[int, int]:
+    """
+    Entspricht der Pascal-Funktion TypToFunktionsAnzahl.
+    Liefert Anzahl der Funktionen und Zieladressen für einen Kanal-Typ.
+    
+    Rückgabewerte:
+        (anzahl_funktionen, anzahl_adressen_pro_funktion)
+    """
+
+    # Keine Funktion vorhanden
+    if pin_typ in (0,):
+        return 0, 0
+
+    # Nur Funktion 1, eine Zieladresse
+    elif pin_typ in (2, 3, 6, 9, 12):
+        return 1, 1
+
+    # Nur Funktion 1, zwei Zieladressen (z. B. bei Rollläden)
+    elif pin_typ in (1, 19):
+        return 1, 2
+
+    # Zwei Funktionen, je eine Adresse (z. B. Taste kurz/lang)
+    elif pin_typ in (8,):
+        return 2, 1
+
+    # Standardfall: 2 Funktionen, 4 Adressen (z. B. Taste kurz/lang + Auf/Ab)
+    else:
+        return 2, 4
+
+
 

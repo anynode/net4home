@@ -95,7 +95,7 @@ class Net4HomeClimate(ClimateEntity):
     @callback
     def _handle_temperature_update(self, value: float):
         """Handle temperature update from sensor."""
-        _LOGGER.debug(f"{self.entity_id} received external temperature update: {value}")
+        #_LOGGER.debug(f"{self.entity_id} received external temperature update: {value}")
         self._attr_current_temperature = value
         self.async_write_ha_state()
 
