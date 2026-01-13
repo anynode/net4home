@@ -1,0 +1,8 @@
+{
+    "tasks": {
+      "deploy-test": {
+        "command": "bash deploy_test.sh"
+      }
+    }
+  }
+  

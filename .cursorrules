@@ -1,0 +1,123 @@
+# Cursor Rules for net4home Home Assistant Integration
+
+## Version Management and Release Process
+
+### Before Committing to GitHub
+
+**CRITICAL**: Before any commit that will be pushed to GitHub, you MUST:
+
+1. **Increment Version in manifest.json**
+   - Read current version from `custom_components/net4home/manifest.json`
+   - Increment the MINOR version (e.g., "1" → "1.1.0", "1.1.0" → "1.2.0")
+   - Update the version field: `"version": "X.Y.Z"`
+   - Follow semantic versioning:
+     - MAJOR: Breaking changes
+     - MINOR: New features, improvements (default for regular commits)
+     - PATCH: Bug fixes only
+   - **Automation**: You can use `scripts/pre-commit-version-bump.sh` (or create CHANGELOG.md first) to automate this
+
+2. **Create or Update CHANGELOG.md**
+   - **If CHANGELOG.md doesn't exist**: Create it with the proper header format (see template below)
+   - Add a new version entry at the top (after the header, before existing version entries)
+   - Use format: `## [X.Y.Z] - YYYY-MM-DD`
+   - Use current date in YYYY-MM-DD format (use `datetime.now().strftime("%Y-%m-%d")`)
+   - Categorize changes:
+     - `### Added` - New features
+     - `### Changed` - Changes in existing functionality
+     - `### Fixed` - Bug fixes
+     - `### Removed` - Removed features
+   - Include brief descriptions of what changed
+   - Reference issue numbers if applicable
+   - **Important**: The version in CHANGELOG.md MUST match the version in manifest.json
+   - **HACS Integration**: HACS will display the changelog from CHANGELOG.md when an update is available
+
+3. **Verify Files**
+   - Ensure `manifest.json` version matches the new CHANGELOG.md entry
+   - Ensure version follows semantic versioning format (X.Y.Z)
+   - Ensure date is in correct format (YYYY-MM-DD)
+
+### Example Workflow
+
+When user asks to commit, push to GitHub, or mentions "commit to GitHub":
+
+1. **Automatically**:
+   - Check if `CHANGELOG.md` exists in repository root - if not, create it with proper header
+   - Check current version in `manifest.json`
+   - Increment minor version (e.g., "1" → "1.1.0", 1.1.0 → 1.2.0)
+   - Update `manifest.json` with new version (format: "X.Y.Z")
+   - Add new entry to `CHANGELOG.md` with:
+     - Version number matching manifest.json exactly
+     - Current date (YYYY-MM-DD format)
+     - Template sections (Added, Changed, Fixed)
+   - Fill in the changelog entry with actual changes from the commit
+   - Inform user of version bump and remind them to review changelog
+
+2. **Manual Alternative**: User can run `bash scripts/pre-commit-version-bump.sh` first (requires CHANGELOG.md to exist), then you fill in changelog details
+
+3. **Always**: After version bump, remind user:
+   - To review and edit CHANGELOG.md with actual changes
+   - To create a GitHub release tag matching the version (e.g., v1.2.0)
+   - That HACS will detect the new version from manifest.json
+
+### Important Notes
+
+- **Version Format**: Always use semantic versioning (MAJOR.MINOR.PATCH)
+- **Changelog Format**: Follow [Keep a Changelog](https://keepachangelog.com/) format
+- **Date Format**: Use YYYY-MM-DD format (e.g., 2024-12-20)
+- **HACS Integration**: 
+  - HACS detects the new version from `manifest.json`
+  - HACS displays the changelog from `CHANGELOG.md`
+  - HACS shows it in the HACS UI when an update is available
+- **Git Tags**: User should create GitHub release tags matching version (e.g., v1.1.0)
+- **CHANGELOG.md Location**: Must be in the repository root for HACS to find it
+
+### Version Bump Rules
+
+- **MINOR bump (default)**: For new features, improvements, non-breaking changes
+- **PATCH bump**: Only for bug fixes that don't add features
+- **MAJOR bump**: Only for breaking changes that require user action
+
+### CHANGELOG.md Template (if file doesn't exist)
+
+```markdown
+# Changelog
+
+All notable changes to the net4home Home Assistant integration will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [X.Y.Z] - YYYY-MM-DD
+
+### Added
+- Description of new features
+
+### Changed
+- Description of changes
+
+### Fixed
+- Description of bug fixes
+```
+
+### Changelog Entry Template (for new versions)
+
+```markdown
+## [X.Y.Z] - YYYY-MM-DD
+
+### Added
+- Description of new features
+
+### Changed
+- Description of changes
+
+### Fixed
+- Description of bug fixes
+```
+
+## Code Style and Best Practices
+
+- Follow Home Assistant integration best practices
+- Use type hints for all public methods
+- Properly handle async operations
+- Clean up resources on unload
+- Support multi-entry scenarios (multiple Bus connectors)
