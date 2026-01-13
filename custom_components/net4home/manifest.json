@@ -2,7 +2,7 @@
   "domain": "net4home",
   "name": "net4home",
   "codeowners": ["@anynode"],
-  "version": "1",
+  "version": "1.2.0",
   "integration_type": "hub",
   "config_flow": true,
   "documentation": "https://github.com/anynode/net4home",
