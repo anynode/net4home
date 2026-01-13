@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] - 2026-01-13
 
 ### Added
-- Automated version management system with cursor rules
+- Automated version management system 
 - Pre-commit version bump scripts (Python, Bash, PowerShell) for cross-platform support
 - Version management documentation and guides
 - Git ignore file for build artifacts and internal documentation
