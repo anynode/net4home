@@ -8,6 +8,6 @@
   "documentation": "https://github.com/anynode/net4home",
   "requirements": [],
   "dependencies": [],
-  "translation": ["de", "en", "es"],
-  "iot_class": "local_push"
+  "iot_class": "local_push",
+  "platforms": ["binary_sensor", "sensor", "button", "switch", "climate", "cover"]
 }

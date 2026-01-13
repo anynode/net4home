@@ -1,16 +1,16 @@
-import logging
-
 from homeassistant.components.cover import CoverEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.util import slugify
 from homeassistant import config_entries
-
-from .const import DOMAIN
-from .api import Net4HomeApi, Net4HomeDevice
 from typing import Callable
 
+from .diagnostic_sensor import Net4HomeSendStateChangesDiagnosticSensor
+from .const import DOMAIN
+from .api import Net4HomeApi, Net4HomeDevice
+
+import logging
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(
@@ -21,21 +21,27 @@ async def async_setup_entry(
     """Set up net4home cover entities."""
     api: Net4HomeApi = hass.data[DOMAIN][entry.entry_id]
 
-    _LOGGER.debug(f"Starting setup_entry with {len(api.devices)} known devices")
-    for d in api.devices.values():
-        _LOGGER.debug(f"→ {d.device_id} ({d.device_type})")
-
     entities = [
         Net4HomeCover(api, entry, device)
         for device in api.devices.values()
         if device.device_type == "cover"
     ]
-    async_add_entities(entities, True)
+
+    diagnostic_entities = [
+        Net4HomeSendStateChangesDiagnosticSensor(entry, device)
+        for device in api.devices.values()
+        if device.device_type == "cover"
+    ]
+
+    async_add_entities(entities + diagnostic_entities, True)
 
     async def async_new_device(device: Net4HomeDevice):
         if device.device_type != "cover":
             return
-        async_add_entities([Net4HomeCover(api, entry, device)])
+        async_add_entities([
+            Net4HomeCover(api, entry, device),
+            Net4HomeSendStateChangesDiagnosticSensor(entry, device)
+        ])
 
     entry.async_on_unload(
         async_dispatcher_connect(
@@ -85,7 +91,6 @@ class Net4HomeCover(CoverEntity):
             "model": self.device.model,
             "via_device": self.device.via_device or "",
             "send_state_changes": self.send_state_changes,  
-
         }
 
     async def async_added_to_hass(self):

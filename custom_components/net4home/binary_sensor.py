@@ -10,6 +10,7 @@ from homeassistant import config_entries
 
 from .const import DOMAIN
 from .api import Net4HomeApi, Net4HomeDevice
+# KEIN Import von .config_sensor hier!
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,6 +23,8 @@ async def async_setup_entry(
     api: Net4HomeApi = hass.data[DOMAIN][entry.entry_id]
 
     _LOGGER.debug(f"[BinarySensor] Starting setup_entry with {len(api.devices)} known devices")
+
+    # NUR BinarySensor Entities (keine ConfigSensor Entities)
     entities = [
         Net4HomeBinarySensor(api, entry, device)
         for device in api.devices.values()
@@ -33,7 +36,9 @@ async def async_setup_entry(
         if device.device_type != "binary_sensor":
             return
         _LOGGER.debug(f"[BinarySensor] Adding new device {device.device_id}")
-        async_add_entities([Net4HomeBinarySensor(api, entry, device)])
+        async_add_entities([
+            Net4HomeBinarySensor(api, entry, device)
+        ])
 
     entry.async_on_unload(
         async_dispatcher_connect(
@@ -44,7 +49,7 @@ async def async_setup_entry(
 
 class Net4HomeBinarySensor(BinarySensorEntity):
     _attr_has_entity_name = False
-    _attr_device_class = BinarySensorDeviceClass.OPENING  # or DOOR, PRESENCE, SMOKE etc. (change as needed)
+    _attr_device_class = BinarySensorDeviceClass.OPENING
 
     def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice):
         self.api = api
@@ -52,14 +57,26 @@ class Net4HomeBinarySensor(BinarySensorEntity):
         self.device = device
         self._is_on = False
         self._attr_name = device.name
-
         via = (device.via_device or "unknown").lower()
         self._attr_unique_id = f"{entry.entry_id}_{slugify(via)}_{slugify(device.device_id)}"
         _LOGGER.debug(f"[BinarySensor] Init {self._attr_name} ({self._attr_unique_id})")
 
     @property
+    def inverted(self) -> bool:
+        devices_opts = self.entry.options.get("devices", {})
+        dev_opts = devices_opts.get(self.device.device_id, {})
+        return dev_opts.get("inverted", False)
+
+    @property
     def is_on(self) -> bool:
-        return self._is_on
+        state = self._is_on
+        if self.inverted:
+            state = not state
+        return state
+
+    @property
+    def extra_state_attributes(self):
+        return {"inverted": self.inverted}
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -73,9 +90,9 @@ class Net4HomeBinarySensor(BinarySensorEntity):
 
     @callback
     def _handle_update(self, state: bool):
-        _LOGGER.debug(f"[BinarySensor] Update {self.device.device_id} → {'ON' if state else 'OFF'}")
-        self._is_on = state
+        self._is_on = not state
         self.async_write_ha_state()
+        _LOGGER.debug(f"[BinarySensor] Update {self.device.device_id} → {'ON' if self.is_on else 'OFF'} (inverted={self.inverted})")
 
     async def async_added_to_hass(self):
         self.async_on_remove(

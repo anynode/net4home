@@ -6,6 +6,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant import config_entries
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.components.diagnostics import async_redact_data
 
 from .models import Net4HomeDevice
 from .const import DOMAIN
@@ -13,7 +14,7 @@ from .api import Net4HomeApi
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = ["light", "switch", "cover", "binary_sensor", "climate", "sensor"]
+PLATFORMS: list[Platform] = ["light", "switch", "cover", "binary_sensor", "climate", "sensor", "button"]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
@@ -48,12 +49,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
             _LOGGER.debug(f"Loaded device from config: {device.device_id} ({device.device_type})")
 
         hass.data[DOMAIN][entry.entry_id] = api
-        
-        # Register options update listener
-        entry.async_on_unload(
-            entry.add_update_listener(options_update_listener1)
-        )
-        
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
         #diagnostics.async_register_diagnostics(
@@ -96,7 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
         _LOGGER.debug(f"List of loaded devices: {list(api.devices.keys())}")
 
         await api.async_connect()
-        api._listen_task = asyncio.create_task(api.async_listen())
+        asyncio.create_task(api.async_listen())
 
         async def delayed_status_request(device_id: str, delay: float):
             await asyncio.sleep(delay)
@@ -154,6 +149,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
         return False
 
 
+async def async_get_options_flow(config_entry):
+    from .options_flow import Net4HomeOptionsFlowHandler
+    return Net4HomeOptionsFlowHandler(config_entry)
+
+
 async def options_update_listener1(hass: HomeAssistant, config_entry: config_entries.ConfigEntry) -> None:
     _LOGGER.debug("Reload net4home config entry wegen Optionen-Änderung")
     hass.data.setdefault(DOMAIN, {})
@@ -173,11 +173,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: config_entries.ConfigEn
     )
 
     if unload_ok:
-        # Unregister services
-        hass.services.async_remove(DOMAIN, "debug_devices")
-        hass.services.async_remove(DOMAIN, "clear_devices")
-        hass.services.async_remove(DOMAIN, "enum_all")
-        
         skip_disconnect = hass.data[DOMAIN].pop("skip_disconnect", False)
         hub: Net4HomeApi = hass.data[DOMAIN].pop(entry.entry_id)
 
@@ -193,19 +188,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: config_entries.ConfigEn
     return unload_ok
 
 
-def _redact_sensitive_data(data: dict, keys_to_redact: dict) -> dict:
-    """Redact sensitive data from diagnostics."""
-    result = data.copy()
-    for key, subkeys in keys_to_redact.items():
-        if key in result:
-            if isinstance(result[key], dict):
-                result[key] = result[key].copy()
-                for subkey in subkeys:
-                    if subkey in result[key]:
-                        result[key][subkey] = "**REDACTED**"
-    return result
-
-
 async def async_get_diagnostics(hass, config_entry):
     """Return diagnostics for the net4home config entry."""
     api = hass.data[DOMAIN][config_entry.entry_id]
@@ -215,13 +197,18 @@ async def async_get_diagnostics(hass, config_entry):
 
     # Gather device info and other relevant data
     devices_info = {}
+    device_options = config_entry.options.get("devices", {})  # <--- NEU
+
     for device_id, device in api.devices.items():
+        dev_opts = device_options.get(device_id, {})  # <--- NEU
         devices_info[device_id] = {
             "name": device.name,
             "model": device.model,
             "device_type": device.device_type,
             "via_device": device.via_device,
-            # add any other info you want to expose
+            # NEU: Diagnosedaten ergänzen!
+            "inverted": dev_opts.get("inverted", False),
+            # hier kannst du weitere Optionen ergänzen
         }
 
     data = {
@@ -236,5 +223,4 @@ async def async_get_diagnostics(hass, config_entry):
     }
 
     # redact sensitive info like passwords if present
-    return _redact_sensitive_data(data, {"connection_info": ["password"]})
-        
+    return async_redact_data(data, {"connection_info": ["password"]})

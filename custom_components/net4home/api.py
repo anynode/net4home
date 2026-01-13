@@ -4,16 +4,15 @@ import struct
 import logging
 import binascii
 import time
+from typing import Tuple, Optional
 
-from typing import Optional
 
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.dispatcher import async_dispatcher_send 
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .helpers import register_device_in_registry
 from .models import Net4HomeDevice  
-from .n4htools import compress_section, decode_d2b, n4h_parse, platine_typ_to_name_a  
+from .n4htools import compress_section, decode_d2b, n4h_parse, platine_typ_to_name_a, get_function_and_address_count
 
 from .const import (
     N4H_IP_PORT,
@@ -68,31 +67,119 @@ class N4HPacketReceiver:
         packets = []
 
         while True:
-            if len(self._buffer) < 2:
-                break  # Not enough data to determine length
+            if len(self._buffer) < 4:
+                break  # Not enough data for length header
 
-            length_bytes = self._buffer[:1]
-            total_len = length_bytes[0] - 4
+            payload_len = int.from_bytes(self._buffer[:4], 'little')
 
-            if len(self._buffer) < total_len:
-                break  # Full packet not yet received
+            if len(self._buffer) < payload_len + 4:
+                break  # Not yet full packet received
 
-            # First 8 bytes after length are uncompressed header
-            header = self._buffer[2:6]
-            ptype = struct.unpack('<h', self._buffer[6:8])[0]
+            full_packet = self._buffer[:payload_len + 4]
+            compressed_payload = full_packet[4:4 + payload_len]
 
-            if ptype == N4HIP_PT_PAKET:
-                payload = self._buffer[8:total_len]
-                packets.append((ptype, payload))
-            elif ptype == N4HIP_PT_OOB_DATA_RAW:
-                _LOGGER.debug(f"Raw OOB data packets received.")
-            elif ptype == N4HIP_PT_PASSWORT_REQ:
-                _LOGGER.debug(f"Password packet received.")
-            else:
-                _LOGGER.debug(f"Ignored packet type: {ptype}")
+            try:
+                decompressed, length = decomp_section_c_exact(
+                    compressed_payload,
+                    offset=0,
+                    length=len(compressed_payload),
+                    max_out_len=2048,
+                    use_cs=False
+                )
 
-            del self._buffer[:total_len + 8]
+                if len(decompressed) >= 2:
+                    ptype = struct.unpack('<h', decompressed[0:2])[0]
+
+                    if ptype == N4HIP_PT_PAKET:
+                        packets.append((ptype, decompressed))
+                    elif ptype == N4HIP_PT_OOB_DATA_RAW:
+                        _LOGGER.debug("Raw OOB data packets received.")
+                        
+                    elif ptype == N4HIP_PT_PASSWORT_REQ:
+                        _LOGGER.debug(f"Password ACK empfangen")
+                    else:
+                        _LOGGER.debug(f"Ignored packet type: {ptype}")
+
+                else:
+                    _LOGGER.warning("Dekomprimierter Block zu kurz (< 8 Byte)")
+
+            except Exception as e:
+                _LOGGER.error(f"Dekomprimierung fehlgeschlagen: {e}")
+
+            del self._buffer[:payload_len + 4]
+
         return packets
+
+
+
+class DecompressionError(Exception):
+    def __init__(self, code: int, detail: int):
+        super().__init__(f"Decompression error {code}, detail: {detail}")
+        self.code = code
+        self.detail = detail
+
+def decomp_section_c_exact(data: bytes, offset: int, length: int, max_out_len: int, use_cs: bool) -> Tuple[bytes, int]:
+    result = bytearray()
+    cs_calc = 0
+    i = offset
+    g_pout_pos = 0
+    ende = False
+    err = False
+
+    while i < length and g_pout_pos < max_out_len and not ende and not err:
+        b = data[i]
+
+        if (b & 0xC0) == 0xC0:
+            if i + 4 >= length:
+                raise DecompressionError(-98, i)
+            cs_rx = (
+                (data[i + 1] << 24)
+                | (data[i + 2] << 16)
+                | (data[i + 3] << 8)
+                | data[i + 4]
+            )
+            i += 5
+            ende = True
+            if use_cs and cs_rx != cs_calc:
+                raise DecompressionError(-100, cs_rx - cs_calc)
+
+        elif (b & 0xC0) == 0x00:
+            if i + 1 >= length:
+                raise DecompressionError(-97, i)
+            cclen = ((data[i] << 8) | data[i + 1]) & 0x3FFF
+            i += 2
+            for j in range(cclen):
+                if i < length:
+                    val = data[i]
+                    result.append(val)
+                    cs_calc += val
+                    g_pout_pos += 1
+                    i += 1
+                else:
+                    raise DecompressionError(-11, i)
+
+        elif (b & 0xC0) == 0x40:
+            if i + 2 >= length:
+                raise DecompressionError(-95, i)
+            cclen = ((data[i] << 8) | data[i + 1]) & 0x3FFF
+            val = data[i + 2]
+            i += 3
+            for _ in range(cclen):
+                result.append(val)
+                cs_calc += val
+                g_pout_pos += 1
+
+        elif (b & 0xC0) == 0x80:
+            raise DecompressionError(-2, i)
+
+        else:
+            raise DecompressionError(-5, i)
+
+    if not err and ende and len(result) <= max_out_len:
+        return bytes(result), len(result)
+
+    raise DecompressionError(-220, i)
+
 
 # Send data to Bus connector
 class N4HPacketSender:
@@ -104,15 +191,15 @@ class N4HPacketSender:
         try:
             # === Paketaufbau im Hexstring
             sendbus  = "A10F"            # N4HIP_PT_PAKET
-            sendbus += "0000"            # 
-            sendbus += "4E000000"        # reservierte Payload-Länge
-            sendbus += "00"              # ?
-            sendbus += "00"              # type8 = 0 for OBJ
+            sendbus += "0000"
+            sendbus += "4E000000"
+            sendbus += "00"
+            sendbus += "00"
 
             # === Adressen codieren
-            sendbus += decode_d2b(mi)           # ipsrc
-            sendbus += decode_d2b(ipdst)        # ipdst
-            sendbus += decode_d2b(objsource)    # objsrc
+            sendbus += decode_d2b(mi)
+            sendbus += decode_d2b(ipdst)
+            sendbus += decode_d2b(objsource)
 
             # === DDATA vorbereiten: erstes Byte = Länge, dann der eigentliche Payload
             full_ddata = bytes([len(ddata)]) + ddata
@@ -135,26 +222,28 @@ class N4HPacketSender:
                 f"datalen={len(ddata)}, ddata=[{ddata_list}], "
                 f"final_bytes={compressed}"
             )
-            _LOGGER.debug(log_line)
+            # _LOGGER.debug(log_line)
             
-            self._writer.write  (final_bytes)
+            # === Senden
+            self._writer.write(final_bytes)
             await self._writer.drain()
 
         except Exception as e:
             _LOGGER.error(f"Error sending data (raw): {e}")
-            
+    
+    
 class Net4HomeApi:
     def __init__(
         self,
-        hass: HomeAssistant,
-        host: str,
+        hass,
+        host,
         port: int = N4H_IP_PORT,
         password: str = "",
         mi: int = DEFAULT_MI,
         objadr: int = DEFAULT_OBJADR,
         entry_id: Optional[str] = None,
         entry=None,  
-    ) -> None:
+    ):
         self._hass = hass
         self._entry_id = entry_id
         self._host = host
@@ -167,14 +256,13 @@ class Net4HomeApi:
         self._packet_receiver = N4HPacketReceiver()
         self._packet_sender: Optional[N4HPacketSender] = None
         self.devices: dict[str, Net4HomeDevice] = {}
+        self._reconnect_enabled = True      
         self._entry = entry
-        self._listen_task: Optional[asyncio.Task] = None
-        self._connected = False
        
 
-    async def async_connect(self) -> None:
+    async def async_connect(self):
+
         self._reader, self._writer = await asyncio.open_connection(self._host, self._port)
-        self._connected = True
         _LOGGER.info(f"Connect with net4home Bus connector at {self._host}:{self._port}")
 
         packet_bytes = binascii.unhexlify(
@@ -212,47 +300,34 @@ class Net4HomeApi:
         _LOGGER.error("Maximale Reconnect-Versuche erreicht. Keine Verbindung zum Bus möglich.")
 
 
-    async def async_disconnect(self) -> None:
-        """Close connection to net4home Bus connector."""
-        self._connected = False
+    async def async_disconnect(self):
+        self._reconnect_enabled = False
         if self._writer:
             self._writer.close()
             await self._writer.wait_closed()
-        if self._reader:
-            self._reader = None
-        self._writer = None
-        self._packet_sender = None
-        _LOGGER.debug("Connection to net4home Bus connector closed")
+            _LOGGER.debug("Connection to net4home Bus connector closed")
 
-    async def async_stop(self) -> None:
-        """Stop the listening task."""
-        if self._listen_task:
-            self._listen_task.cancel()
-            try:
-                await self._listen_task
-            except asyncio.CancelledError:
-                pass
-            self._listen_task = None
-            _LOGGER.debug("Listen task stopped")
-
-    async def async_listen(self) -> None:
+    async def async_listen(self):
         _LOGGER.debug("Start listening for bus packets")
         try:
             while True:
                 try:
                     data = await self._reader.read(4096)
+                    
                     if not data:
                         _LOGGER.warning("Connection to net4home Bus connector closed")
-                        await self.async_reconnect()
-                        continue
+                        if self._reconnect_enabled:
+                            await self.async_reconnect()
+                        else:
+                            _LOGGER.info("Reconnect disabled – leaving listener")
+                            break                        
                 except (ConnectionResetError, OSError) as e:
                     _LOGGER.error(f"Network error: {e}")
                     await self.async_reconnect()
                     continue
-                except asyncio.CancelledError:
-                    _LOGGER.debug("Listen task cancelled during read")
-                    raise
+                    
                 packets = self._packet_receiver.receive_raw_command(data)
+                
                 for ptype, payload in packets:
                     try:
                         ret, paket = n4h_parse(payload)
@@ -311,7 +386,7 @@ class Net4HomeApi:
                                 device_type="climate"
                                 objadr=paket.objsrc
                                 
-                            _LOGGER.debug(f"ACK_TYP received for device: {device_id} ({device_type}) ({model}) ({objadr}) ({sw_version})")
+                            # _LOGGER.debug(f"ACK_TYP received for device: {device_id} ({device_type}) ({model}) ({objadr}) ({sw_version})")
 
                             try:
                                 await register_device_in_registry(
@@ -339,10 +414,10 @@ class Net4HomeApi:
                                 device = self.get_known_device(device_id)
                                 continue
 
-                            _LOGGER.debug(f"D0_ACTOR_ACK für *** {device_id}: {device.device_type} - obj {device.objadr} - {paket.objsrc}")
+                            # _LOGGER.debug(f"D0_ACTOR_ACK für *** {device_id}: {device.device_type} - obj {device.objadr} - {paket.objsrc}")
 
                             if device.device_type == 'climate':
-                                _LOGGER.debug(f"D0_ACTOR_ACK für {device_id}: ")
+                                # _LOGGER.debug(f"D0_ACTOR_ACK für {device_id}: ")
 
                                 if device.objadr == paket.objsrc:
                                     sensor_key = "targettemp"
@@ -358,7 +433,7 @@ class Net4HomeApi:
                                     lo = paket.ddata[3]
                                     temp = ((hi << 8) | lo) / 10.0
                                     temp = hi / 10
-                                    _LOGGER.debug(f"D0_ACTOR_ACK für {device_id}: {sensor_key} {temp}")
+                                    # _LOGGER.debug(f"D0_ACTOR_ACK für {device_id}: {sensor_key} {temp}")
                                     async_dispatcher_send(self._hass, f"net4home_update_{device_id}", {sensor_key: temp})
                                     async_dispatcher_send(self._hass, f"net4home_update_{device_id}_{sensor_key}", temp)
 
@@ -393,7 +468,7 @@ class Net4HomeApi:
                                     async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_closed)
                                     
                         elif b0 == D0_RD_ACTOR_DATA_ACK:
-                            _LOGGER.debug(f"D0_RD_ACTOR_DATA_ACK identified: {paket.ddata[2]}")
+                            _LOGGER.debug(f"D0_RD_ACTOR_DATA_ACK identified Type: {paket.ddata[2]}")
                             
                             b1  = paket.ddata[1] + 1 # channel
                             b2  = paket.ddata[2]     # actor type
@@ -417,7 +492,7 @@ class Net4HomeApi:
                                 is_jal = True
 
                             # We have a classic switch with ON/OFF feature
-                            if b2 == OUT_HW_NR_IS_ONOFF and not is_dimmer:
+                            if b2 == OUT_HW_NR_IS_ONOFF:
                                 _LOGGER.debug(f"OUT_HW_NR_IS_ONOFF identified: {device_id}")
 
                                 # Module details
@@ -431,16 +506,25 @@ class Net4HomeApi:
                                 b12 = paket.ddata[10]    # inverted
                                 t1  = b3*256+b4 # time1
                                 
+                                if is_dimmer:
+                                    model="Licht"
+                                    device_type="light"
+                                else:
+                                    model="Schalter"
+                                    device_type="switch"
+                                
+                                
+                                
                                 try:
                                     await register_device_in_registry(
                                         hass=self._hass,
                                         entry=self._entry,
                                         device_id=device_id,
                                         name = f"CH{b1}_{device_id[3:]}",
-                                        model="Schalter",
+                                        model=model,
                                         sw_version="",
                                         hw_version="",
-                                        device_type="switch",
+                                        device_type=device_type,
                                         via_device=via_device,
                                         api=self,
                                         objadr=objadr,
@@ -512,97 +596,52 @@ class Net4HomeApi:
                                     _LOGGER.debug(f"OUT_HW_NR_IS_JAL identified: {device_id} - CH{b1} - State change {bool(b7)} ")
                                 except Exception as e:
                                     _LOGGER.error(f"Error during registration of COVER device (channel) {device_id}: {e}")
-
-                            if b2 == OUT_HW_NR_IS_ONOFF and is_dimmer:
-
-                                _LOGGER.debug(f"OUT_HW_NR_IS_DIM Paket : {' '.join(f'{b:02X}' for b in paket.ddata)}")
-
-                                # Module details
-                                b7  = paket.ddata[7]     # Status update
-                                
-                                _LOGGER.debug(f"OUT_HW_NR_IS_DIMMER identified: {device_id}")
-
-                                try:
-                                    await register_device_in_registry(
-                                        hass=self._hass,
-                                        entry=self._entry,
-                                        device_id=device_id,
-                                        name = f"CH{b1}_{device_id[3:]}",
-                                        model="Dimmer",
-                                        sw_version="",
-                                        hw_version="",
-                                        device_type="light",
-                                        via_device=via_device,
-                                        api=self,
-                                        objadr=objadr,
-                                        send_state_changes=bool(b7),
-                                    )
-                                    _LOGGER.debug(f"OUT_HW_NR_IS_DIMMER identified: {device_id} - CH{b1} - State change {bool(b7)} ")
-                                except Exception as e:
-                                    _LOGGER.error(f"Error during registration of DIMMER device (channel) {device_id}: {e}")
                                     
                         elif b0 == D0_RD_SENSOR_DATA_ACK:
-                            _LOGGER.debug(f"D0_RD_SENSOR_DATA_ACK identified: Typ: {paket.ddata[2]} - {' '.join(f'{b:02X}' for b in paket.ddata)}")
 
-            
-                            b1  = paket.ddata[1] + 1 # channel
-                            b2  = paket.ddata[2]     # actor type (1=ON_CLOSE, 5=ON_SHORT_CLOSE__ON_LONG_CLOSE)
+                            EE_IN_TAB_ADRFKT_LEN   = 5
+                            EE_IN_TAB_ADR_OFFSET   = 0
+                            EE_IN_TAB_FKT_OFFSET   = 2
 
-                            offSet1   = 0 + 2 -1
-                            offSet2   = offSet1 + 5
-                            offSet3   = 0 + 2 + 1
-                            offSet4   = 0 + 2 + 1
-                            offSetAdr = offSet2 + 5
+                            EE_OFFSET_PIN_IS       = 0 + 2
+                            EE_OFFSET_FKT1         = EE_OFFSET_PIN_IS + 1
+                            EE_OFFSET_FKT2         = EE_OFFSET_FKT1   + EE_IN_TAB_ADRFKT_LEN
+                            EE_OFFSET_ADR          = EE_OFFSET_FKT2   + EE_IN_TAB_ADRFKT_LEN
+                            EE_OFFSET_MEM_STATE    = EE_OFFSET_ADR    + 2
+
+                            EE_OFFSET_TIMER                 = EE_OFFSET_MEM_STATE + 1
+                            EE_NCNO_INV                     = EE_OFFSET_TIMER     + 2
+                            EE_OFFSET_FKT3                  = EE_NCNO_INV         + 1
+                            EE_OFFSET_FKT4                  = EE_OFFSET_FKT3      + 5
+
+                            pin_typ = paket.ddata[EE_OFFSET_PIN_IS]
+                            #_LOGGER.debug(f"D0_RD_SENSOR_DATA_ACK identified: Typ: {pin_typ} - {' '.join(f'{b:02X}' for b in paket.ddata)}")
+
+                            channel = paket.ddata[1] + 1
+                            function_count, _ = get_function_and_address_count(pin_typ)
+
+                            objadr = paket.ddata[EE_OFFSET_ADR]*256+paket.ddata[EE_OFFSET_ADR+1]
+                            detected_inverted = bool(paket.ddata[EE_NCNO_INV])
                             
-                            # Hier kommen noch mehr Optionen für andere Typen 
-                            # 1 - ON_CLOSE (Nur Schließen)
-                            # 5 - 2. Funktion  - ON_SHORT_CLOSE__ON_LONG_CLOSE (Kurz/Lang)
-                            
-                            if paket.ddata[2] == 1:
-                                offSetAdr = offSetAdr
-                            elif paket.ddata[2] == 5: 
-                                offSetAdr = offSetAdr + 2
-                            else:
-                                continue
+                            #_LOGGER.debug(f"Erkannte objadr: {objadr} (Offset {EE_OFFSET_ADR})")
 
-                            if offSetAdr is None or offSetAdr+1 >= len(paket.ddata):
-                                _LOGGER.error(f"Invalid offSetAdr or paket.ddata too short: offSetAdr={offSetAdr}, len={len(paket.ddata)}")
-                                continue
-    
-                            _LOGGER.debug(f"D0_RD_SENSOR_DATA_ACK identified: off: {offSetAdr} - Typ: {paket.ddata[2]} - len: {len(paket.ddata)}")
-
-                            if len(paket.ddata) <= offSetAdr:
-                                continue
-                            
-#  adrSelf := ddata[EE_OFFSET_ADR]*256+ ddata[EE_OFFSET_ADR+1];
-#  EE_OFFSET_PIN_IS                = 0 +2;
-#  EE_OFFSET_FKT1                  = EE_OFFSET_PIN_IS + 1;
-#  EE_OFFSET_FKT2                  = EE_OFFSET_FKT1   + EE_IN_TAB_ADRFKT_LEN;
-#  EE_OFFSET_ADR                   = EE_OFFSET_FKT2   + EE_IN_TAB_ADRFKT_LEN;
-#  EE_OFFSET_MEM_STATE             = EE_OFFSET_ADR    + 2;
-#  EE_OFFSET_TIMER                 = EE_OFFSET_MEM_STATE + 1;
-#  EE_NCNO_INV                     = EE_OFFSET_TIMER     + 2;
-#  EE_OFFSET_FKT3                  = EE_NCNO_INV         + 1;
-#  EE_OFFSET_FKT4                  = EE_OFFSET_FKT3      + 5;
-                            device_id = f"OBJ{(paket.ddata[offSetAdr]*256 + paket.ddata[offSetAdr+1]):05d}"
-                            objadr = (paket.ddata[offSetAdr]*256 + paket.ddata[offSetAdr+1])
-                          
+                            device_id = f"OBJ{objadr:05d}"
                             via_device = f"MI{paket.ipsrc:04X}"
                             device_obj = self.devices.get(via_device)
-                            _LOGGER.debug(f"D0_RD_SENSOR_DATA_ACK identified: model: device_id:{device_id} - {device_obj.model} - {via_device} - {objadr}")
 
-                            if device_obj and device_obj.model in ('UP-S4'):
+                            #_LOGGER.debug(f"D0_RD_SENSOR_DATA_ACK → model: {device_id}, objadr: {objadr}, via: {via_device}, model: {getattr(device_obj, 'model', 'UNKNOWN')}")
+
+                            is_sensor = False
+                            if device_obj and device_obj.model in ('UP-S4',):
                                 is_sensor = True
 
-                            if b2 == is_sensor:
-                                _LOGGER.debug(f"OUT_HW_NR_IS_ONOFF identified: {device_id}")
-
+                            if is_sensor:
                                 try:
                                     await register_device_in_registry(
                                         hass=self._hass,
                                         entry=self._entry,
                                         device_id=device_id,
-                                        name = f"CH{b1}_{device_id[3:]}",
+                                        name=f"CH{channel}_{device_id[3:]}",
                                         model="sensor",
                                         sw_version="",
                                         hw_version="",
@@ -610,23 +649,24 @@ class Net4HomeApi:
                                         via_device=via_device,
                                         api=self,
                                         objadr=objadr,
+                                        inverted=detected_inverted,  
                                     )
+                                    #_LOGGER.debug(f"SENSOR registration for  → model: {device_id}, objadr: {objadr}, via: {via_device}, model: {getattr(device_obj, 'model', 'UNKNOWN')}")
                                 except Exception as e:
-                                    _LOGGER.error(f"Error during registration of SENSOR device (channel) {device_id}: {e}")
-
+                                    _LOGGER.error(f"Error during SENSOR registration for {device_id}: {e}")
 
                         elif b0 == D0_SENSOR_ACK:
-                            _LOGGER.debug(f"D0_SENSOR_ACK identified: Typ: {paket.ddata[1]} - {' '.join(f'{b:02X}' for b in paket.ddata)}")
+                            # _LOGGER.debug(f"D0_SENSOR_ACK identified: Typ: {paket.ddata[1]} - {' '.join(f'{b:02X}' for b in paket.ddata)}")
                             device_id = f"OBJ{paket.objsrc:05d}"
                             device = self.devices.get(device_id)
 
                             if not device:
                                 continue
                             
-                            is_on = paket.ddata[2] == 1
+                            is_closed = paket.ddata[2] == 1
 
-                            _LOGGER.debug(f"D0_ACTOR_ACK für {device_id}: {is_on}")
-                            async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_on)
+                            _LOGGER.debug(f"D0_ACTOR_ACK für {device_id}: {is_closed}")
+                            async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_closed)
                             
                         
                         elif b0 == D0_RD_MODULSPEC_DATA_ACK:
@@ -664,7 +704,7 @@ class Net4HomeApi:
                                 sensor_type = "temperature"
                                 obj_heat = (b6 << 8) + b7 
                                 obj_cool = (b8 << 8) + b9
-                                _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK identified: objadr: {objadr} - obj_heat: {obj_heat} - obj_cool: {obj_cool}")
+                                # _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK identified: objadr: {objadr} - obj_heat: {obj_heat} - obj_cool: {obj_cool}")
                                 
                             if b1 < 0x80: # 3 Sensoren für ein UP-TLH (UP-T prüfen)
                             
@@ -686,7 +726,7 @@ class Net4HomeApi:
                                 device_id = f"OBJ{(sensor_obj):05d}"
                                     
                                 if sensor_type:
-                                    _LOGGER.debug(f"New Sensor: device: {device_id} - objadr: {sensor_obj} - sensor type: {sensor_type} ")
+                                    # _LOGGER.debug(f"New Sensor: device: {device_id} - objadr: {sensor_obj} - sensor type: {sensor_type} ")
                                     await register_device_in_registry(
                                         hass=self._hass,
                                         entry=self._entry,
@@ -727,7 +767,7 @@ class Net4HomeApi:
                                     
                         elif b0 == D0_VALUE_ACK:
                             device_id = f"OBJ{paket.objsrc:05d}"
-                            _LOGGER.debug(f"D0_VALUE_ACK für {device_id} – Typ: {paket.ddata[1]}")
+                            # _LOGGER.debug(f"D0_VALUE_ACK für {device_id} – Typ: {paket.ddata[1]}")
 
                             if paket.ddata[1] == IN_HW_NR_IS_TEMP:
                                 i_analog_value = paket.ddata[3] * 256 + paket.ddata[4]
@@ -738,21 +778,21 @@ class Net4HomeApi:
                                 sensor_type = "temperature"
                                 dispatcher_key = f"net4home_update_{device_id}_{sensor_type}"
                                 async_dispatcher_send(self._hass, dispatcher_key, value)
-                                _LOGGER.debug(f"_temperature D0_VALUE_ACK für {dispatcher_key} – Value: {value}")
+                                #_LOGGER.debug(f"_temperature D0_VALUE_ACK für {dispatcher_key} – Value: {value}")
                                 
                             elif paket.ddata[1] == IN_HW_NR_IS_HUMIDITY:
                                 value = paket.ddata[3] * 256 + paket.ddata[4]
                                 sensor_type = "humidity"
                                 dispatcher_key = f"net4home_update_{device_id}_{sensor_type}"
                                 async_dispatcher_send(self._hass, dispatcher_key, value)
-                                _LOGGER.debug(f"_humidity D0_VALUE_ACK für {dispatcher_key} – Value: {value}")
+                                #_LOGGER.debug(f"_humidity D0_VALUE_ACK für {dispatcher_key} – Value: {value}")
                                     
                             elif paket.ddata[1] == IN_HW_NR_IS_LICHT_ANALOG:
                                 value = paket.ddata[3] * 256 + paket.ddata[4]
                                 sensor_type = "illuminance"
                                 dispatcher_key = f"net4home_update_{device_id}_{sensor_type}"
                                 async_dispatcher_send(self._hass, dispatcher_key, value)
-                                _LOGGER.debug(f"_illuminance D0_VALUE_ACK für {dispatcher_key} – Value: {value}")
+                                #_LOGGER.debug(f"_illuminance D0_VALUE_ACK für {dispatcher_key} – Value: {value}")
                         
                         elif b0 == D0_STATUS_INFO:
                             device_id = f"OBJ{paket.objsrc:05d}"
@@ -771,31 +811,27 @@ class Net4HomeApi:
                                     }
                                 )
                             else:
-                                _LOGGER.debug(f"STATUS_INFO für {device_id}: {'ON' if is_on else 'OFF'}")
+                                # _LOGGER.debug(f"STATUS_INFO für {device_id}: {'ON' if is_on else 'OFF'}")
                                 async_dispatcher_send(self._hass, f"net4home_update_{device_id}", is_on)
 
-                        elif b0 in {"D0_SET", "D0_INC", "D0_DEC", "D0_TOGGLE"}:
+                        elif b0 in {D0_SET, D0_INC, D0_DEC, D0_TOGGLE}:
                             device_id = f"OBJ{paket.objsrc:05d}"
                             device = self.devices.get(device_id)
 
                             if not device:
                                 continue
 
-                            _LOGGER.debug(f"D0_xxx für {device_id} – Befehl: {paket.ddata[0]}")
-                            
-        except asyncio.CancelledError:
-            _LOGGER.debug("Listen task cancelled")
-            raise
-        except (ConnectionResetError, OSError, asyncio.TimeoutError) as e:
-            _LOGGER.error(f"Network error in listen loop: {e}")
-        except Exception as e:
-            _LOGGER.exception(f"Unexpected error in listen loop: {e}")
+                            # _LOGGER.debug(f"D0_xxx für {device_id} – Befehl: {paket.ddata[0]}")
 
-    async def async_turn_on_switch(self, device_id: str) -> None:
+                            if device.device_type == "binary_sensor":
+                                await self.async_request_status(device.device_id)
+                            
+                                                        
+        except Exception as e:
+            _LOGGER.error(f"Fehler im Listener: {e}")
+
+    async def async_turn_on_switch(self, device_id: str):
         """Sendet ein EIN-Signal an das angegebene Switch-Device."""
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
-            return
         try:
             device = self.devices.get(device_id)
             if not device:
@@ -831,11 +867,8 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Fehler beim Schalten EIN für {device_id}: {e}")
 
-    async def async_turn_off_switch(self, device_id: str) -> None:
+    async def async_turn_off_switch(self, device_id: str):
         """Sendet ein AUS-Signal an das angegebene Switch-Device."""
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
-            return
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Ungültige device_id: {device_id}")
@@ -860,10 +893,7 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
 
-    async def async_request_status(self, device_id: str) -> None:
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot request status for {device_id}")
-            return
+    async def async_request_status(self, device_id: str):
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Invalid device_id: {device_id} for status request.")
@@ -892,11 +922,8 @@ class Net4HomeApi:
             _LOGGER.error(f"Error sending status request for {device_id}: {e}")
 
 
-    async def async_open_cover(self, device_id: str) -> None:
+    async def async_open_cover(self, device_id: str):
         # Send open signal to net4home device
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
-            return
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Ungültige device_id: {device_id}")
@@ -921,11 +948,8 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
 
-    async def async_close_cover(self, device_id: str) -> None:
+    async def async_close_cover(self, device_id: str):
         # Send close signal to net4home device
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
-            return
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Ungültige device_id: {device_id}")
@@ -950,11 +974,8 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
 
-    async def async_stop_cover(self, device_id: str) -> None:
+    async def async_stop_cover(self, device_id: str):
         # Send stop signal to net4home device
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
-            return
         try:
             if not device_id.startswith("OBJ"):
                 _LOGGER.warning(f"Ungültige device_id: {device_id}")
@@ -980,10 +1001,7 @@ class Net4HomeApi:
             _LOGGER.error(f"Fehler beim Schalten AUS für {device_id}: {e}")
         
 
-    async def async_turn_on_light(self, device_id: str, brightness: int = 255) -> None:
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
-            return
+    async def async_turn_on_light(self, device_id: str, brightness: int = 255):
         device = self.devices.get(device_id)
         if not device:
             _LOGGER.warning(f"Kein Light-Gerät mit ID {device_id} gefunden")
@@ -1001,10 +1019,7 @@ class Net4HomeApi:
         )
         _LOGGER.debug(f"Schalte Light EIN {device_id} mit Helligkeit {brightness100} (OBJ={objadr}) gesendet")
 
-    async def async_turn_off_light(self, device_id: str) -> None:
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
-            return
+    async def async_turn_off_light(self, device_id: str):
         device = self.devices.get(device_id)
         if not device:
             _LOGGER.warning(f"Kein Light-Gerät mit ID {device_id} gefunden")
@@ -1025,11 +1040,8 @@ class Net4HomeApi:
 
 
 
-    async def send_enum_all(self) -> None:
+    async def send_enum_all(self):
         """Send a device discovery to the bus."""
-        if not self._connected:
-            _LOGGER.warning("Not connected, cannot send ENUM_ALL")
-            return
         try:
             # ENUM_ALL ist ein Broadcast an MI 0xFFFF (65535), ohne spezifische OBJ-Adresse
 
@@ -1051,11 +1063,8 @@ class Net4HomeApi:
             _LOGGER.warning(f"Unbekanntes Gerät: {device_id}")
         return device
 
-    async def async_set_climate_mode(self, device_id: str, hvac_mode: str, target_temp: float = None) -> None:
+    async def async_set_climate_mode(self, device_id: str, hvac_mode: str, target_temp: float = None):
         """Set climate mode with bits: bit0 = Heat ON, bit1 = Cool ON, plus target temperature as single byte (temp * 10)."""
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
-            return
         objadr = self.devices[device_id].objadr
         mode_byte = 0
 
@@ -1085,11 +1094,8 @@ class Net4HomeApi:
         _LOGGER.debug(f"Set climate mode {hvac_mode} (byte={mode_byte:02X}), target_temp={target_temp} ({temp_byte}) for {device_id} (OBJ={objadr})")
 
 
-    async def async_set_temperature(self, device_id: str, temperature: float) -> None:
+    async def async_set_temperature(self, device_id: str, temperature: float):
         """Send target temperature to net4home bus."""
-        if not self._connected:
-            _LOGGER.warning(f"Not connected, cannot send command to {device_id}")
-            return
         objadr = self.devices[device_id].objadr
         temp_val = int(round(temperature * 10))  # z.B. 22.5°C ➜ 225
         hi = (temp_val >> 8) & 0xFF
