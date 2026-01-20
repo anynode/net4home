@@ -88,18 +88,20 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Return the options flow handler."""
-        return Net4HomeOptionsFlowHandler(config_entry)
+        # In Home Assistant 2025.12+, config_entry is automatically available
+        # as a property in OptionsFlow - don't pass it to __init__
+        return Net4HomeOptionsFlowHandler()
 
 
 class Net4HomeOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for net4home integration."""
 
-    def __init__(self, config_entry):
+    def __init__(self):
         """Initialize the options flow handler."""
-        # config_entry is automatically available as self.config_entry property
-        # We just need to accept it as parameter but don't need to set it
-        # The base class OptionsFlow handles it automatically
-        pass
+        # In Home Assistant 2025.12+, config_entry is automatically available
+        # as a read-only property via self.config_entry
+        # No need to accept it as a parameter or set it manually
+        super().__init__()
 
     async def async_step_init(self, user_input=None):
         """Single step for options including ENUM_ALL trigger settings."""

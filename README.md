@@ -30,11 +30,20 @@ The `net4home` integration allows connections to more than one Bus connector. Fo
 
 ## Installation
 
-To add the net4home integration to your Home Assistant instance, use this My button:
+### HACS Installation (Recommended)
 
-[![Open your Home Assistant instance and show the dashboard of a Supervisor add-on.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=core_configurator)
+To install this integration via HACS (Home Assistant Community Store), use this button:
 
-If the above My button doesn't work, you can also perform the following steps manually:
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=anynode&repo=net4home&category=integration)
+
+After installation via HACS:
+1. Restart Home Assistant
+2. Go to Settings → Devices & Services → Add Integration
+3. Search for "net4home" and follow the setup wizard
+
+### Manual Installation
+
+If you prefer to install manually, follow these steps:
 1. Copy the `net4home` folder into your Home Assistant configuration directory under `custom_components/`:
    ```
    custom_components/net4home/
@@ -138,7 +147,7 @@ The integration provides the following custom services:
 
 ## Version
 
-Current version: **1.2.0**
+Current version: **1.3.0**
 
 ## Support
 
