@@ -9,7 +9,8 @@
           "port": "Port (3478)",
           "password": "Passwort",
           "MI": "MI",
-          "OBJADR": "OBJADR"
+          "OBJADR": "OBJADR",
+          "discover": "Busmodule ermitteln"
         }
       }
     },
@@ -37,9 +38,37 @@
           "ee_text": "EE-Text",
           "module_mi": "Modul-MI",
           "device_module_type": "Gerätemodultyp",
-          "device_mi": "Geräte-MI"
+          "device_mi": "Geräte-MI",
+          "trigger_enum_all": "Busmodule ermitteln"
         }
       }
+    },
+    "error": {
+      "enum_all_failed": "ENUM_ALL konnte nicht ausgelöst werden. Bitte prüfen Sie die Logs.",
+      "api_not_available": "API nicht verfügbar. Bitte starten Sie Home Assistant neu oder prüfen Sie die Verbindung."
+    }
+  },
+  "sensor": {
+    "rf_key": "RF-Schlüssel",
+    "short_hold": "Kurz vorgehalten",
+    "long_hold": "Lang vorgehalten",
+    "removed_after_short": "Weggezogen nach kurz",
+    "sunrise": "Sonnenaufgang",
+    "sunset": "Sonnenuntergang",
+    "broadcast interval": "Broadcast-Intervall"
+  },
+  "button": {
+    "read_device": "Lese Modul"
+  },
+  "device_automation": {
+    "trigger_type": {
+      "rf_key_short_hold": "RF-Key kurz vorgehalten",
+      "rf_key_long_hold": "RF-Key lang vorgehalten",
+      "rf_key_removed_after_short": "RF-Key weggezogen nach kurz",
+      "rf_key_any": "RF-Key erkannt"
+    },
+    "extra_fields": {
+      "rf_key": "Optional: Spezifischer RF-Key-Code (z.B. 0105F469E9)"
     }
   }
 }

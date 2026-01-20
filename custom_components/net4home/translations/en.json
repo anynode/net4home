@@ -9,7 +9,8 @@
           "port": "Port (3478)",
           "password": "Password",
           "MI": "MI",
-          "OBJADR": "OBJADR"
+          "OBJADR": "OBJADR",
+          "discover": "Enum bus modules"
         }
       }
     },
@@ -37,9 +38,37 @@
           "ee_text": "EE Text",
           "module_mi": "Module MI",
           "device_module_type": "Device Module Type",
-          "device_mi": "Device MI"
+          "device_mi": "Device MI",
+          "trigger_enum_all": "Enum bus modules"
         }
       }
+    },
+    "error": {
+      "enum_all_failed": "ENUM_ALL could not be triggered. Please check the logs.",
+      "api_not_available": "API not available. Please restart Home Assistant or check the connection."
+    }
+  },
+  "sensor": {
+    "rf_key": "RF-Key",
+    "short_hold": "Short Hold",
+    "long_hold": "Long Hold",
+    "removed_after_short": "Removed After Short",
+    "sunrise": "Sunrise",
+    "sunset": "Sunset",
+    "broadcast interval": "Broadcast Interval"
+  },
+  "button": {
+    "read_device": "Read Device"
+  },
+  "device_automation": {
+    "trigger_type": {
+      "rf_key_short_hold": "RF-Key short hold",
+      "rf_key_long_hold": "RF-Key long hold",
+      "rf_key_removed_after_short": "RF-Key removed after short hold",
+      "rf_key_any": "RF-Key detected"
+    },
+    "extra_fields": {
+      "rf_key": "Optional: Specific RF-Key code (e.g., 0105F469E9)"
     }
   }
 }

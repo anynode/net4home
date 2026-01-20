@@ -1,5 +1,10 @@
 # API Review Findings (internal documentation)
 API_REVIEW_FINDINGS.md
+cursor.json
+scripts/pre-commit-version-bump.py
+.gitattributes
+/custom_components/net4home/.gitattributes
+
 
 # Python
 __pycache__/

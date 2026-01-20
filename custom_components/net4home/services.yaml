@@ -1,0 +1,22 @@
+debug_devices:
+  name: Geräte-Log schreiben
+  description: Loggt alle registrierten Geräte von net4home
+  fields:
+    entry_id:
+      description: Falls du mehrere net4home-Instanzen hast, gib hier eine spezifische entry_id an.
+      example: "d98271281c2a4d1e86a77a92e37a93e3"
+      required: false
+      selector:
+        text:
+clear_devices:
+  name: Geräte zurücksetzen
+  description: Löscht alle gespeicherten Geräte für die Integration (aus entry.options)
+  fields:
+    entry_id:
+      description: Falls du mehrere net4home-Instanzen hast, gib hier eine spezifische entry_id an.
+      example: "d98271281c2a4d1e86a77a92e37a93e3"
+      required: false
+      selector:
+        text:
+        
+        

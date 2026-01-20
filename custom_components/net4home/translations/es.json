@@ -9,7 +9,8 @@
           "port": "Puerto (3478)",
           "password": "Contraseña",
           "MI": "MI",
-          "OBJADR": "OBJADR"
+          "OBJADR": "OBJADR",
+          "discover": "Enumerar módulos del bus"
         }
       }
     },
@@ -37,9 +38,37 @@
           "ee_text": "Texto EE",
           "module_mi": "MI del módulo",
           "device_module_type": "Tipo de módulo del dispositivo",
-          "device_mi": "MI del dispositivo"
+          "device_mi": "MI del dispositivo",
+          "trigger_enum_all": "Enumerar módulos del bus"
         }
       }
+    },
+    "error": {
+      "enum_all_failed": "No se pudo activar ENUM_ALL. Por favor, revise los registros.",
+      "api_not_available": "API no disponible. Por favor, reinicie Home Assistant o verifique la conexión."
+    }
+  },
+  "sensor": {
+    "rf_key": "Clave RF",
+    "short_hold": "Mantenido Corto",
+    "long_hold": "Mantenido Largo",
+    "removed_after_short": "Retirado Después de Corto",
+    "sunrise": "Amanecer",
+    "sunset": "Atardecer",
+    "broadcast interval": "Intervalo de Difusión"
+  },
+  "button": {
+    "read_device": "Leer Dispositivo"
+  },
+  "device_automation": {
+    "trigger_type": {
+      "rf_key_short_hold": "Clave RF mantenida corta",
+      "rf_key_long_hold": "Clave RF mantenida larga",
+      "rf_key_removed_after_short": "Clave RF retirada después de corta",
+      "rf_key_any": "Clave RF detectada"
+    },
+    "extra_fields": {
+      "rf_key": "Opcional: Código de Clave RF específico (ej., 0105F469E9)"
     }
   }
 }

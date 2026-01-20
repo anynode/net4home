@@ -143,7 +143,13 @@ D0_VALUE_ACK = 101
 D0_VALUE_REQ = 102
 D0_STATUS_INFO = 105
 D0_MODUL_BUSY = 35
+D0_RD_ACTOR_DATA = 26
 D0_RD_ACTOR_DATA_ACK = 31
+
+D0_WR_SENSOR_DATA = 14
+D0_RD_SENSOR_DATA = 15
+D0_RD_SENSOR_DATA_ACK = 16
+
 D0_GET_NAME_REQ = 33
 D0_GET_NAME_ACK = 34
 
@@ -178,10 +184,8 @@ D0_SET_N = 59
 D0_DIM = 60
 D0_START_DIM = 64
 
-D0_SENSOR_ACK = 65
 D0_LOCK = 66
 D0_LOCK_STATE_REQ = 67
-D0_LOCK_STATE_ACK = 68
 
 D0_SAVE = 69
 D0_RECALL = 70
@@ -237,10 +241,19 @@ D0_TRANSFER_ERASE = 116
 
 D0_SLEEP = 114
 
-# --- Bitmasken für type8 Flags ---
+# --- Bitmasks for type8 flags ---
+sa2_ADR_OBJ = 0
+sa2_T8_IP = 1  # MI-Adresse (IP-Adresse)
+sa2_T8_IP_ON_BUS = 2
 saCYCLIC = 0x04
 saACK_REQ = 0x08
 saPNR_MASK = 0xF0
+sa2_ADR_GRUPPE = 0x8000
+sa2_ADR_TYP_MASK = 0x8000
+sa2_ADR_MASK = 0x7FFF
+
+SEND_AS_OBJ_GRP = 0
+SEND_AS_IP = sa2_T8_IP  # = 1, for MI addresses
 
 # --- Status- und Steuerbits ---
 D1_ENABLE_CONFIGURATION_OK_BYTE = 0xD3
@@ -252,12 +265,29 @@ LOCK_BIT_BIN_VALUE = 1
 # --- Spezialwerte ---
 MI_EMPTY = 0
 MI_BRC = 0xFFFF
-BROADCASTIP = 0xFFFF
 
-# --- Sonstige Konstanten ---
-OUT_HW_NR_IS_ONOFF = 1
-OUT_HW_NR_IS_DIMMER = 3
-OUT_HW_NR_IS_DALI_STATUS = 40
+# --- Paketstruktur-Konstanten ---
+MAX_N4H_PAKET_LEN = 64  # Maximale ddata-Länge
+HEADER_SIZE = 8  # Header-Größe in Bytes
+RESERVED1_DEFAULT = 0  # Standardwert für reserved1
+TYPE8_SIZE = 1  # type8 Größe in Bytes
+SKIP_BYTE_SIZE = 1  # Byte nach type8 wird übersprungen
+ADDRESS_SIZE = 2  # word = 2 Bytes
+DDATALEN_SIZE = 1  # ddatalen Größe in Bytes
+TRAILER_SIZE = 4  # csRX, csCalc, len, posb (4 Bytes)
+# Standard-Payload-Länge für maximale Pakete (ohne Header):
+# type8(1) + skip(1) + ipsrc(2) + ipdest(2) + objsrc(2) + ddatalen(1) + ddata(64) + trailer(4) = 77
+# Die tatsächliche Payload-Länge kann variieren je nach ddatalen
+STANDARD_PAYLOAD_LEN = (
+    TYPE8_SIZE + SKIP_BYTE_SIZE +
+    ADDRESS_SIZE * 3 +  # ipsrc, ipdest, objsrc
+    DDATALEN_SIZE +
+    MAX_N4H_PAKET_LEN +
+    TRAILER_SIZE
+)  # = 77 Bytes
+# Hinweis: Die Dokumentation zeigt 78 Bytes, möglicherweise wird ein zusätzliches Byte benötigt  # 65535 - Broadcast address for normal commands
+BROADCASTIP = 0x7FFF  # 32767 - Broadcast address for normal broadcasts
+MI_ENUM_ALL = 0xFFFF  # 65535 - Special address for ENUM_ALL (MIFFFF)
 
 # --- SMS Flags ---
 D0_SMS = 75
@@ -303,3 +333,126 @@ VAL_IS_MIN_TAG_WORD_SU = 51
 
 IN_HW_NR_IS_RF_TAG_READER = 7
 
+OT_NO = 1
+OT_DI = 2  # S4 Eingang
+OT_AR = 3
+OT_ART = 4
+OT_AD = 5
+OT_ADT = 6
+OT_AX_TIME = 7
+OT_AJ_MOT = 8
+OT_AJ_PERC = 9
+OT_MOTORRIEGEL_A = 10
+OT_AD_MAX_PERC = 11
+OT_ARS = 12  # AR als StatusInfo
+OT_APWM = 13  # AT8e
+OT_BLINK = 14
+OT_FENSTERUE = 15
+OT_LCD_A = 16
+OT_PAKETROUTER_T1 = 17
+OT_PAKETROUTER_T2 = 18
+OT_PAKETROUTER_BASE = 19
+OT_HS_TIME_TAB = 20
+OT_HS_TIME_BASE = 21
+OT_TLH_SOLLWERT = 22
+OT_TLH_TAB = 23  # leerer Eintrag
+OT_TLH_SENSOR_T = 24
+OT_TLH_SENSOR_L = 25
+OT_TLH_SENSOR_H = 26
+OT_TLH_TAGWERT = 27
+OT_TLH_NACHTWERT = 28
+OT_TLH_TAB_ROUTING_ZIEL = 29
+OT_TLH_TAB_T = 30
+OT_TLH_TAB_L = 31
+OT_TLH_TAB_H = 32
+
+OT_HS_JAL_BASE = 33  # nur D0_SLEEP von WZ
+
+OT_HS_JAL_BEREICH_REL_ZEIT_AUF = 35
+OT_HS_JAL_BEREICH_REL_ZEIT_AB = 36
+OT_HS_JAL_BEREICH_VOLL_AUF = 37  # Difference 0.. for full to partial travel
+OT_HS_JAL_BEREICH_VOLL_AB = 38  # Difference 0.. for full to partial travel
+OT_HS_JAL_BEREICH_TEILFAHRT_PERC = 39  # %-Wert Teilfahrt
+OT_HS_JAL_BEREICH_TEILFAHRT_ENABLED = 40  # Teilfahrt 0 / 1
+
+OT_HS_JAL_VIRTUAL_JAL_P = 41
+OT_HS_JAL_VIRTUAL_JAL_M = 42
+
+OT_HS_JAL_MAIN_TIME_NEXT = 43
+OT_HS_JAL_MAIN_TIME_WOCHE = 44
+OT_HS_JAL_MAIN_TIME_SA = 45
+OT_HS_JAL_MAIN_TIME_SO = 46
+OT_HS_JAL_MAIN_TIME_LICHTWERT = 47
+OT_HS_JAL_MAIN_TIME_MODUS_AUF = 48
+OT_HS_JAL_MAIN_TIME_MODUS_AB = 49
+
+OT_HS_CLI_TIME_NEXT = 60
+OT_HS_CLI_TIME_WOCHE = 61
+OT_HS_CLI_TIME_SA = 62
+OT_HS_CLI_TIME_SO = 63
+OT_HS_CLI_BEREICH_T1 = 64
+OT_HS_CLI_BEREICH_T2 = 65
+OT_HS_CLI_BEREICH_T3 = 66
+OT_HS_CLI_BEREICH_N = 67
+OT_HS_CLI_BEREICH_P = 68
+OT_HS_CLI_BEREICH_U = 69
+
+OT_HS_CLI_BASE_3 = 75
+OT_CLIMATE_RAUM = 76
+
+OT_HS_CLI_BEREICH_REL_T1 = 80
+OT_HS_CLI_BEREICH_REL_T2 = 81
+OT_HS_CLI_BEREICH_REL_T3 = 82
+OT_HS_CLI_BEREICH_REL_N = 83
+
+OT_EXT_LD_BASE = 90
+OT_EXT_LD_BASE_1 = 91
+OT_EXT_LD_BASE_2 = 92
+
+OT_SAFETY_BASE = 100
+OT_SAFETY_EVENT = 101
+
+OT_RF_DEST = 110
+
+OT_GSM_BASE = 120
+
+OT_ACCESS_LCD = 200
+OT_ACCESS_KEY = 201
+OT_ACCESS_OPTIONS = 202
+
+OT_UP_RF_SRC = 210
+
+OT_WAV_BELL = 220
+OT_WAV_BELL_NOT = 221
+OT_WAV_BELL_LCD = 222
+
+OT_PIR2_BASE = 230
+OT_PIR2_BASE_SABO = 231
+OT_PIR2_BASE_DUNKEL = 232
+OT_PIR2_BASE_HELL = 233
+OT_PIR2_BASE_MODE = 234 
+OT_AD_TOG_SOFT = 382
+
+OUT_HW_NR_IS_ONOFF = 1
+OUT_HW_NR_IS_JAL = 2
+OUT_HW_NR_IS_DIMMER = 3
+OUT_HW_NR_IS_TIMER = 4
+OUT_HW_NR_IS_ONOFF_STATUS = 10
+OUT_HW_NR_IS_SLOW_PWM = 12
+OUT_HW_NR_IS_DALI_STATUS = 40
+OUT_HW_NR_IS_BIN_BLINKER = 45
+OUT_HW_NR_IS_FENSTERUEBERWACHUNG = 46
+OUT_HW_NR_IS_SOFT_TOGGLE_DIM = 54
+
+# --- LCD Option Flags (for D0_SET_N with ddata[1] = 0xF0) ---
+CI_LCD_OPT_CLR_HOME = 0x01  # Clear & Home
+CI_LCD_OPT_BLINK = 0x02  # Blinken
+CI_LCD_OPT_LICHT_AUTO = 0x04  # Licht automatisch
+CI_LCD_OPT_LICHT_LANG_EIN = 0x08  # Licht lang ein
+CI_LCD_OPT_BUZZER_ON = 0x10  # Buzzer an
+CI_LCD_OPT_LFCR = 0x20  # Line Feed / Carriage Return
+CI_LCD_OPT_USE_XY = 0x40  # X/Y-Position verwenden
+
+# LCD String lengths
+LCD_STR_LEN_1 = 24  # Standard LCD string length
+LCD_STR_LEN_1_M = 18  # LCD-4x16M string length

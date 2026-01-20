@@ -1,8 +1,14 @@
 import logging
+import asyncio
 from typing import NamedTuple
+from typing import Tuple, Optional
 from typing import Dict, Any
+from .models import TN4Hpaket
+
+
 from .const import (
     D0_SET_IP,
+    D0_GET_TYP,
     D0_ENUM_ALL,
     D0_ACK_TYP,
     D0_ACK,
@@ -18,6 +24,10 @@ from .const import (
     D0_VALUE_ACK,
     D0_VALUE_REQ,
     D0_STATUS_INFO,
+    D0_RD_ACTOR_DATA,
+    D0_RD_ACTOR_DATA_ACK,
+    D0_RD_SENSOR_DATA_ACK,
+    D0_RD_SENSOR_DATA,
     saCYCLIC,
     saACK_REQ,
     saPNR_MASK,
@@ -191,9 +201,26 @@ from .const import (
     PLATINE_HW_IS_S32,
     PLATINE_HW_IS_PC_SOFTWARE,
     PLATINE_HW_IS_VIRTUAL_BASE,
+    OUT_HW_NR_IS_ONOFF,
+    OUT_HW_NR_IS_TIMER,
+    OUT_HW_NR_IS_ONOFF_STATUS,
+    OUT_HW_NR_IS_SLOW_PWM,
+    OUT_HW_NR_IS_BIN_BLINKER,
+    OUT_HW_NR_IS_FENSTERUEBERWACHUNG,
+    OUT_HW_NR_IS_SOFT_TOGGLE_DIM,
+    OT_AR,
+    OT_ART,
+    OT_ARS,
+    OT_APWM,
+    OT_BLINK,
+    OT_FENSTERUE,
+    OT_NO,
+    OT_AD,
+    OT_AD_TOG_SOFT,
+    OT_ADT,
 )
 
-    
+  
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -203,112 +230,131 @@ class TN4Hpaket(NamedTuple):
     ipdest: int         # word
     objsrc: int         # word
     ddatalen: int       # byte
-    ddata: bytes        # rohes Datenfeld
+    ddata: bytes        # raw data field
     csRX: int           # byte
     csCalc: int         # byte
     length: int         # byte
     posb: int           # byte
 
-
-def n4h_parse(payload_bytes: bytes) -> tuple[str, TN4Hpaket]:
-    payload = payload_bytes.hex()
+def n4h_parse(payload: bytes) -> tuple[str, Optional[TN4Hpaket]]:
+    """Parse net4home packet from payload bytes."""
     ret = ""
+    paket = None
 
-    # _LOGGER.debug("Paket Payload: %s", payload_bytes.hex())
+    if len(payload) < 8:
+        _LOGGER.warning("Packet too short (less than 8 bytes for header)")
+        return "Packet too short", None
 
-    if len(payload) < 40:
-        return ("Payload zu kurz für Parsing", None)
+    IP_HEADER_LEN = 8
+    header_bytes = payload[:IP_HEADER_LEN]
+    result = payload[IP_HEADER_LEN:]
 
-    ip = int(payload[2:4] + payload[0:2], 16)
-    ret += f"IP={ip}\t"
+    if len(result) < 9:
+        _LOGGER.warning("Payload too short for packet structure (<9 bytes)")
+        return "Payload too short for packet structure", None
 
-    unknown = payload[4:16]
-    ret += f"({unknown})\t"
+    try:
+        type8 = result[0]
+        ipsrc = int.from_bytes(result[2:4], 'little')
+        ipdest = int.from_bytes(result[4:6], 'little')
+        objsrc = int.from_bytes(result[6:8], 'little')
+        ddatalen = result[8]
+        ddata = result[9:9 + ddatalen]
 
-    type8 = int(payload[16:18], 16)
-    ret += f"type8={type8}\t"
+        paket = TN4Hpaket(
+            type8=type8,
+            ipsrc=ipsrc,
+            ipdest=ipdest,
+            objsrc=objsrc,
+            ddatalen=len(ddata),
+            ddata=ddata,
+            csRX=0,
+            csCalc=0,
+            length=0,
+            posb=0,
+        )
 
-    # MI = ipsrc
-    mi_str = payload[18:20] + payload[16:18]
-    ipsrc = int(mi_str, 16)
-    ret += f"MI={mi_str}\t"
+        ddata_list = paket.ddata[:paket.ddatalen]
+        
+        if len(ddata_list) > 15:
+            ddata_hex = ' '.join(f"{b:02X}" for b in ddata_list[:15]) + " ..."
+        else:
+            ddata_hex = ' '.join(f"{b:02X}" for b in ddata_list)
+            ddata_hex = ddata_hex.ljust(49)  # 20 * 2 chars + 19 spaces = 59
 
-    ipdst = int(payload[22:24] + payload[20:22], 16)
-    ret += f"ipdst={ipdst}\t"
+        ziel = "Broadcast" if paket.ipdest == 0x7FFF else f"Target {paket.ipdest}"
+        sFkt = interpret_n4h_sFkt(paket)
+        befehl = sFkt.split(' ')[0] if sFkt else "Unknown"
 
-    objsrc = int(payload[26:28] + payload[24:26], 16)
-    ret += f"objsrc={objsrc}\t"
+        log_line = (
+            f"Module sender (MI{paket.ipsrc:04X})\t"
+            f"Sender {paket.objsrc:05d}\t"
+            f"{ziel}\t"
+            f"Data {ddata_hex}\t"
+            f"{sFkt}"
+        )
+        _LOGGER.debug(log_line)
 
-    datalen = int(payload[28:30], 16)
-    ret += f"datalen={datalen}\t"
 
-    ddata_end = 30 + datalen * 2
-    if len(payload) < ddata_end + 8:
-        return ("Payload zu kurz für ddata und Checkbytes", None)
 
-    ddata_hex = payload[30:ddata_end]
-    ret += f"ddata={ddata_hex}\t"
-
-    pos = ddata_end
-
-    csRX = int(payload[pos:pos+2], 16)
-    csCalc = int(payload[pos+2:pos+4], 16)
-    length = int(payload[pos+4:pos+6], 16)
-    posb = int(payload[pos+6:pos+8], 16)
-    ret += f"({csRX}/{csCalc}/{length}/{posb})"
-
-    # ddata als Bytes
-    ddata_bytes = bytes.fromhex(ddata_hex)
-
-    paket = TN4Hpaket(
-        type8=type8,
-        ipsrc=ipsrc,
-        ipdest=ipdst,
-        objsrc=objsrc,
-        ddatalen=datalen,
-        ddata=ddata_bytes,
-        csRX=csRX,
-        csCalc=csCalc,
-        length=length,
-        posb=posb,
-    )
-
-    # log_line = f"OBJ {ipsrc:04X}   {objsrc:05d} >  {ipdst:04X} {datalen:02X} {' '.join(ddata_hex.upper()[i:i+2] for i in range(0, len(ddata_hex), 2))}  {interpret_n4h_sFkt(paket)}"
-    log_line = f"OBJ {ipsrc:04X}   {objsrc:05d} >  {ipdst:04X} {datalen:02X} {' '.join(ddata_hex.upper()[i:i+2] for i in range(0, len(ddata_hex), 2)).ljust(45)} {interpret_n4h_sFkt(paket)}"
-
-    _LOGGER.debug(log_line)
+    except Exception as e:
+        _LOGGER.exception("Error parsing packet: %s", e)
+        return "Error parsing packet", None
 
     return ret, paket
 
-def log_parsed_packet(header: bytes, payload: bytes):
-    """Log a parsed packet in a human readable form."""
-    try:
-        # TN4Hpaket-Struktur aus n4h_L2_def.pas:
-        # type8 (1B), ipsrc (2B), ipdest (2B), objsrc (2B), ddatalen (1B), ddata (64B), csRX (1B), csCalc (1B), len (1B), posb (1B)
-        if len(payload) < 8:
-            _LOGGER.warning("Paket zu kurz für Parsing: %s", payload.hex())
-            return
-        type8 = payload[0]
-        ipsrc = int.from_bytes(payload[1:3], "little")
-        ipdest = int.from_bytes(payload[3:5], "little")
-        objsrc = int.from_bytes(payload[5:7], "little")
-        ddatalen = payload[7]
-        ddata = payload[8:8+ddatalen]
-        objdst = ipdest
 
-        mi_str = f"{ipsrc:05d}"
-        objsrc_str = f"{objsrc:05d}"
-        objdst_str = f"{objdst:05d}"
-        objadr_str = f"{objdst:04x}".upper()
-        ddata_str = " ".join(f"{b:02X}" for b in ddata)
-        logstr = f"OBJ {objadr_str}   {mi_str} >  {objdst_str} {type8:02X} {ddata_str}"
-        _LOGGER.info(logstr)
-    except Exception as ex:
-        _LOGGER.error("Fehler beim Paket-Parsing: %s", ex)
+def hex_lines(b: bytes) -> str:
+    """Format bytes as hex lines."""
+    h = b.hex().upper()
+    return " ".join(" ".join(h[i:i+2] for i in range(p, min(p+32, len(h)), 2)) for p in range(0, len(h), 32))
+
+
+class DecompressionError(Exception):
+    def __init__(self, code: int, detail: int):
+        super().__init__(f"Decompression error {code}, detail: {detail}")
+        self.code = code
+        self.detail = detail
+
+
+def compress_section(payload_hex: str) -> str:
+    """Compress a hex payload section."""
+    cs = sum(int(payload_hex[i:i+2], 16) for i in range(0, len(payload_hex), 2))
+    length = len(payload_hex) // 2
+    hi = (length >> 8) & 0xFF
+    lo = length & 0xFF
+
+    compressed = f"{hi:02X}{lo:02X}" + payload_hex + "C0"
+    compressed += f"{(cs >> 24) & 0xFF:02X}"
+    compressed += f"{(cs >> 16) & 0xFF:02X}"
+    compressed += f"{(cs >> 8) & 0xFF:02X}"
+    compressed += f"{cs & 0xFF:02X}"
+
+    total_length = len(compressed) // 2
+    return f"{total_length:02X}000000" + compressed
+
+def n4h_serialize_packet(paket: TN4Hpaket) -> bytes:
+    """Convert TN4Hpaket to a byte array."""
+    data = bytearray()
+    data.append(paket.type8)
+    data += paket.ipsrc.to_bytes(2, "big")
+    data += paket.ipdest.to_bytes(2, "big")
+    data += paket.objsrc.to_bytes(2, "big")
+    data.append(paket.ddatalen)
+    data += bytes(paket.ddata[:paket.ddatalen])
+    return data
+
+
+def decode_d2b(value: int) -> str:
+    """Decode a 16-bit value to hex string with swapped bytes."""
+    hexval = f"{value:04X}"
+    return hexval[2:4] + hexval[0:2]
+
 
 def adr_to_text_obj_grp(padr: bytes) -> str:
+    """Convert address bytes to text (OBJ or GRP)."""
     if len(padr) < 2:
-        raise ValueError("padr muss mindestens 2 Bytes lang sein")
+        raise ValueError("padr must be at least 2 bytes long")
     adr = padr[0] * 256 + padr[1]
     if adr & 0x8000 == 0x8000:
         return f"GRP {adr - 0x8000}"
@@ -316,17 +362,20 @@ def adr_to_text_obj_grp(padr: bytes) -> str:
         return f"OBJ {adr}"
 
 def adr_to_text(adr: int) -> str:
+    """Convert address integer to text (G prefix for groups)."""
     if adr & 0x8000 == 0x8000:
         return f"G{adr - 0x8000}"
     else:
         return str(adr)
 
 def adr_to_text_gruppe(adr: int) -> str:
+    """Convert address to group text."""
     return str(adr & 0x7FFF)
 
 def text_to_adr(s: str) -> int:
+    """Convert text to address integer."""
     adr = 0x8000 if ('G' in s.upper()) else 0
-    # Alle führenden Nicht-Ziffern entfernen
+    # Remove all leading non-digits
     while len(s) > 0 and not s[0].isdigit():
         s = s[1:]
     try:
@@ -336,6 +385,7 @@ def text_to_adr(s: str) -> int:
     return adr + value
 
 def text_to_adr_gruppe(s: str) -> int:
+    """Convert text to group address integer."""
     while len(s) > 0 and not s[0].isdigit():
         s = s[1:]
     try:
@@ -345,13 +395,16 @@ def text_to_adr_gruppe(s: str) -> int:
     return value | 0x8000
 
 def interpret_n4h_sFkt(paket) -> str:
-
+    """Interpret net4home packet function."""
     sFkt = ""
-
+    
+    if not isinstance(paket, TN4Hpaket):
+        return "<invalid paket>"
+    
     if paket.ddatalen == 0:
-        return "keine Daten"
+        return "no data"
 
-    # Beispiel: LCD-Text falls ddata[0] == D0_SET_N und ddata[1] == 0xF0
+    # Example: LCD text if ddata[0] == D0_SET_N and ddata[1] == 0xF0
     if paket.ddatalen >= 2 and paket.ddata[0] == D0_SET_N and paket.ddata[1] == 0xF0:
         try:
             text = paket.ddata[5:paket.ddatalen].decode("latin1")
@@ -372,9 +425,14 @@ def interpret_n4h_sFkt(paket) -> str:
     b0 = paket.ddata[0]
 
     if b0 == D0_SET_N:
-        sFkt += f"D0_SET_N, {paket.ddata[1]},{paket.ddata[2]}"
+        if paket.ddatalen >= 3:
+            sFkt += f"D0_SET_N, {paket.ddata[1]},{paket.ddata[2]}"
+        else:
+            sFkt += f"D0_SET_N (insufficient data: {paket.ddatalen} bytes)"
     elif b0 == D0_ACK:
         sFkt += "D0_ACK"
+    elif b0 == D0_GET_TYP:
+        sFkt += "D0_GET_TYP"
     elif b0 == D0_NOACK:
         sFkt += "NO_ACK (Error)"
     elif b0 == D0_ACTOR_ACK:
@@ -382,9 +440,29 @@ def interpret_n4h_sFkt(paket) -> str:
     elif b0 == D0_VALUE_ACK:
         sFkt += "D0_VALUE_ACK"
         sFkt += " " + decode_and_print_value_ack(paket.ddata)
+    elif b0 == D0_ENABLE_CONFIGURATION:
+        sFkt += "D0_ENABLE_CONFIGURATION"
     elif b0 == D0_ACK_TYP:
+        # ddata[01] - Module type
+        # ddata[10] - Config Enabled
+        
         sFkt += "D0_ACK_TYP "
-        sFkt += " " + platine_typ_to_name_a(paket.ddata[1])
+        if paket.ddatalen >= 2:
+            sFkt += " " + platine_typ_to_name_a(paket.ddata[1])
+        else:
+            sFkt += " (insufficient data)"
+        # paket.ddata[10] -> paket.ddata[10] and D10_CONFIG_ENABLE_BIT ) <>0 -> Konfiguration/Betrieb/Factory
+    elif b0 == D0_RD_ACTOR_DATA:
+        sFkt += "D0_RD_ACTOR_DATA"
+    elif b0 == D0_RD_ACTOR_DATA_ACK:
+        sFkt += "D0_RD_ACTOR_DATA_ACK"
+    elif b0 == D0_GET_SERIAL_REQ:
+        sFkt += "D0_GET_SERIAL_REQ"
+    elif b0 == D0_GET_SERIAL_ACK:
+        if paket.ddatalen >= 4:
+            sFkt += "D0_GET_SERIAL_ACK - Serial " + str((paket.ddata[1] << 16) | (paket.ddata[2] << 8) | paket.ddata[3])
+        else:
+            sFkt += "D0_GET_SERIAL_ACK (insufficient data)"
     elif b0 == D0_VALUE_REQ:
         sFkt += "D0_VALUE_REQ"
     elif b0 == D0_STATUS_INFO:
@@ -398,29 +476,52 @@ def interpret_n4h_sFkt(paket) -> str:
     elif b0 == D0_SET_IP:
         sFkt += "D0_SET_IP"
     elif b0 == D0_SET:
-        # sFkt += f"D0_SET, {paket.ddata[1]},{paket.ddata[2]}"
-        sFkt += f"D0_SET, {paket.ddata[1]},"
+        if paket.ddatalen >= 2:
+            sFkt += f"D0_SET {paket.ddata[1]}"
+        else:
+            sFkt += "D0_SET (insufficient data)"
     elif b0 == D0_INC:
         sFkt += "D0_INC"
     elif b0 == D0_DEC:
         sFkt += "D0_DEC"
     elif b0 == D0_ENUM_ALL:
         sFkt += "D0_ENUM_ALL"
+    elif b0 == D0_SET_PROFIL:
+        sFkt += "D0_SET_PROFIL"
+    elif b0 == D0_START_DIM:
+        if paket.ddatalen >= 3:
+            sFkt += f"D0_START_DIM {paket.ddata[1]},{paket.ddata[2]}"
+        else:
+            sFkt += "D0_START_DIM (insufficient data)"
+    elif b0 == D0_RD_SENSOR_DATA:
+        sFkt += "D0_RD_SENSOR_DATA"
+    elif b0 == D0_RD_SENSOR_DATA_ACK:
+        sFkt += "D0_RD_SENSOR_DATA_ACK"
+    elif b0 == D0_RD_MODULSPEC_DATA:
+        sFkt += "D0_RD_MODULSPEC_DATA"
+    elif b0 == D0_RD_MODULSPEC_DATA_ACK:
+        sFkt += "D0_RD_MODULSPEC_DATA_ACK"
+    elif b0 == D0_WR_MODULSPEC_DATA:
+        sFkt += "D0_WR_MODULSPEC_DATA"
+    elif b0 == 255:
+        # Paket ins leere
+        sFkt += ""
     else:
-        sFkt += f"Unbekanntes Paket 0x{b0:02X}"
+        sFkt += f"Unknown packet 0x{b0:02X}"
 
     return sFkt.strip()
 
 def int_to_str2(i: int) -> str:
-    """Wandelt eine Zahl in einen zweistelligen String mit führender Null um."""
+    """Convert a number to a two-digit string with leading zero."""
     return f"{i:02d}"
 
 
 def bcd_to_bin(bcd_in: int) -> int:
-    """Konvertiert eine BCD-codierte Zahl (Byte) in eine Ganzzahl."""
+    """Convert a BCD-encoded number (byte) to an integer."""
     return ((bcd_in & 0xF0) >> 4) * 10 + (bcd_in & 0x0F)
 
 def su_woche_bit_mask_to_text(dow: int) -> str:
+    """Convert week bit mask to text."""
     result = ''
     result += 'Mo' if dow & 0x01 else '--'
     result += 'Di' if dow & 0x02 else '--'
@@ -433,6 +534,7 @@ def su_woche_bit_mask_to_text(dow: int) -> str:
     return result
 
 def su_woche_bit_mask_to_text2(dow: int) -> str:
+    """Convert week bit mask to text (alternative format)."""
     result = ''
     if dow & 0x01:
         result += 'Mo'
@@ -453,6 +555,7 @@ def su_woche_bit_mask_to_text2(dow: int) -> str:
     return result
 
 def wochentag_to_text(dow: int) -> str:
+    """Convert weekday number to text."""
     mapping = {
         0: 'Mo',
         1: 'Di',
@@ -467,10 +570,10 @@ def wochentag_to_text(dow: int) -> str:
 
 def decode_and_print_value_ack(paket: bytes) -> str:
     """
-    Decodiert ein D0_VALUE_ACK-Paket (paket ist bytes, entspricht paket.ddata).
-    Liefert einen beschreibenden String zurück.
+    Decode a D0_VALUE_ACK packet (paket is bytes, corresponds to paket.ddata).
+    Returns a descriptive string.
     """
-    # Lokale Statusvariablen
+    # Local status variables
     s_last_value_ack_text = ""
     gs_last_key_info = ""
     g_analog_value = 0
@@ -478,7 +581,7 @@ def decode_and_print_value_ack(paket: bytes) -> str:
     s = ""
     ddata = paket
 
-    # Konstanten (nur die relevanten)
+    # Constants (only the relevant ones)
     IN_HW_NR_IS_CLOCK = 6
     DCF77_SYNC_PHASE = 0x10
     DCT_FEIERTAG = 0x08
@@ -501,7 +604,7 @@ def decode_and_print_value_ack(paket: bytes) -> str:
     VAL_IS_MIN_TAG_WORD_SU = 51
     IN_HW_NR_IS_RF_TAG_READER = 7
 
-    # Auswertung
+    # Evaluation
     #if len(ddata) < 6:
     #    return "Paket zu kurz"
 
@@ -551,24 +654,24 @@ def decode_and_print_value_ack(paket: bytes) -> str:
     elif ddata[1] == IN_HW_NR_IS_PRESS_TENDENZ:
         i_analog_value = ddata[4]
         if i_analog_value == 0:
-            s_last_value_ack_text = "noch nicht verfügbar (Tendenz ist erst 60 Minuten nach Powerup verfügbar)"
+            s_last_value_ack_text = "not yet available (tendency is only available 60 minutes after powerup)"
         elif i_analog_value == 1:
-            s_last_value_ack_text = "stark fallend (unbeständiges Tiefdrucksystem, Sturm)"
+            s_last_value_ack_text = "strongly falling (unstable low pressure system, storm)"
         elif i_analog_value == 2:
-            s_last_value_ack_text = "fallend (stabiles Schlechtwetter)"
+            s_last_value_ack_text = "falling (stable bad weather)"
         elif i_analog_value == 3:
-            s_last_value_ack_text = "konstant (stabiles Wetter)"
+            s_last_value_ack_text = "constant (stable weather)"
         elif i_analog_value == 4:
-            s_last_value_ack_text = "steigend (stabiles Schönwetter)"
+            s_last_value_ack_text = "rising (stable good weather)"
         elif i_analog_value == 5:
-            s_last_value_ack_text = "stark steigend (unbeständiges Hochdrucksystem)"
+            s_last_value_ack_text = "strongly rising (unstable high pressure system)"
         else:
-            s_last_value_ack_text = "nicht erlaubter Wert " + str(i_analog_value)
-        s = "Luftdruck Tendenz: " + s_last_value_ack_text
+            s_last_value_ack_text = "invalid value " + str(i_analog_value)
+        s = "Air pressure tendency: " + s_last_value_ack_text
     elif ddata[1] == IN_HW_NR_IS_PRESS_MBAR:
         i_analog_value = ddata[3] * 256 + ddata[4]
         s_last_value_ack_text = f"{i_analog_value / 10:.1f} hPas"
-        s = "Druck " + s_last_value_ack_text
+        s = "Pressure " + s_last_value_ack_text
     elif ddata[1] == IN_HW_NR_IS_LICHT_ANALOG:
         i_analog_value = ddata[3] * 256 + ddata[4]
         s_last_value_ack_text = str(i_analog_value)
@@ -587,11 +690,11 @@ def decode_and_print_value_ack(paket: bytes) -> str:
         s = "Regenmenge " + s_last_value_ack_text
     elif ddata[1] == IN_HW_NR_IS_REGEN:
         i_analog_value = ddata[3] * 256 + ddata[4]
-        s_last_value_ack_text = f"{i_analog_value} %"
+        s_last_value_ack_text = f"{i_analog_value}%"
         s = "Regen " + s_last_value_ack_text
     elif ddata[1] == IN_HW_NR_IS_HUMIDITY:
         i_analog_value = ddata[3] * 256 + ddata[4]
-        s_last_value_ack_text = f"{i_analog_value} %"
+        s_last_value_ack_text = f"{i_analog_value}%"
         s = "Feuchte/Regen " + s_last_value_ack_text
     elif ddata[1] in [VAL_IS_MIN_TAG_WORD_SA, VAL_IS_MIN_TAG_WORD_SU]:
         i_analog_value = ddata[3] * 256 + ddata[4]
@@ -610,11 +713,11 @@ def decode_and_print_value_ack(paket: bytes) -> str:
         )
         tag_state = ddata[9] & 6
         if tag_state == 0:
-            gs_last_key_info += " vorgehalten"
+            gs_last_key_info += " held"
         elif tag_state == 2:
-            gs_last_key_info += " lang vorgehalten"
+            gs_last_key_info += " held long"
         elif tag_state == 4:
-            gs_last_key_info += " weggezogen nach kurz"
+            gs_last_key_info += " removed after short"
         s = "RF-Key " + gs_last_key_info
         s_last_value_ack_text = gs_last_key_info
     else:
@@ -627,7 +730,7 @@ def decode_and_print_value_ack(paket: bytes) -> str:
 
 
 def platine_typ_to_name_a(b: int) -> str:
-    """Convert platine hardware type byte to human-readable name."""
+    """Convert module hardware type byte to human-readable name."""
     mapping: Dict[int, str] = {
         PLATINE_HW_IS_PC_SOFTWARE: 'PC-Software',
         PLATINE_HW_IS_S8: 'UP-S8',
@@ -725,27 +828,140 @@ def platine_typ_to_name_a(b: int) -> str:
         return ''
 
 
-def add_module_if_new(self, device_info: Dict[str, Any]) -> None:
-    modules = self.entry.options.get("modules", [])
-    module_mi = device_info.get("module_mi")
+def text_to_adrG(s: str) -> int:
+    """
+    Convert a string to an address.
+    If the string starts with 'G' or 'g', 0x8000 is set.
+    Remaining characters are interpreted as a decimal number.
+    """
+    s = s.strip()
+    result = 0
+    if s.lower().startswith('g'):
+        result = 0x8000
+        s = s[1:]
+    try:
+        value = int(s)
+    except ValueError:
+        value = 0
+    return result + value
 
-    if module_mi is None:
-        # Invalid or incomplete device info
-        return
 
-    # Check if module already registered
-    if any(module.get("module_mi") == module_mi for module in modules):
-        return  # Already registered, do nothing
+def adrG_to_text(w: int) -> str:
+    """Convert address to text with G prefix for groups."""
+    base = w & 0x7FFF
+    if (w & 0x8000) != 0:
+        return 'G' + str(base)
+    return str(base)
 
-    # Append new module
-    modules.append(
-        {
-            "module_type": device_info.get("module_type"),
-            "software_version": device_info.get("software_version"),
-            "ee_text": device_info.get("ee_text"),
-            "module_mi": module_mi,
-        }
-    )
-    # Save back updated modules list
-    self.entry.options["modules"] = modules
-    # If your platform requires, trigger save/update here (depends on your framework)
+
+def StrToAdr(s: str) -> int:
+    """Convert string to address."""
+    return text_to_adrG(s)
+
+
+def StrToAdr2(s: str) -> int:
+    """Convert string to address (supports MI prefix)."""
+    s = s.strip()
+    if s.upper().startswith('MI'):
+        hex_part = s[2:6]  # 4 characters after MI
+        try:
+            value = int(hex_part, 16)
+        except ValueError:
+            value = 0
+        return 0x10000 + value
+    return text_to_adrG(s)
+
+
+def StrToAdrDef0(sAdr: str) -> int:
+    """Convert string to address (defaults to 0 if empty)."""
+    sAdr = sAdr.strip()
+    if sAdr == '':
+        return 0
+    return text_to_adrG(sAdr)
+
+
+def AdrToStr(w: int) -> str:
+    """Convert address to string."""
+    return adrG_to_text(w)
+
+
+def AdrToStr2(w: int) -> str:
+    """Convert address to string (supports MI format)."""
+    if w >= 0x10000:
+        return f"MI{w - 0x10000:04X}"
+    return adrG_to_text(w)
+
+
+def h2n_adr_as_text(ah, al) -> str:
+    """Convert high and low address bytes to text."""
+    try:
+        ah = int(ah, 16) if isinstance(ah, str) else ah
+        al = int(al, 16) if isinstance(al, str) else al
+    except ValueError:
+        return "??"
+    return AdrToStr(ah * 256 + al)
+
+
+
+def AR_d0_to_ot(d0: int) -> int:
+    """
+    Convert d0 (Output Hardware Number) to OT_AR type.
+    """
+    if d0 == OUT_HW_NR_IS_ONOFF:
+        return OT_AR
+    if d0 == OUT_HW_NR_IS_TIMER:
+        return OT_ART
+    if d0 == OUT_HW_NR_IS_ONOFF_STATUS:
+        return OT_ARS
+    if d0 == OUT_HW_NR_IS_SLOW_PWM:
+        return OT_APWM
+    if d0 == OUT_HW_NR_IS_BIN_BLINKER:
+        return OT_BLINK
+    if d0 == OUT_HW_NR_IS_FENSTERUEBERWACHUNG:
+        return OT_FENSTERUE
+    return OT_NO
+
+
+def AD_d0_to_ot(d0: int) -> int:
+    """
+    Convert d0 (Output Hardware Number) to OT_AD type.
+    """
+    if d0 == OUT_HW_NR_IS_ONOFF:
+        return OT_AD
+    if d0 == OUT_HW_NR_IS_SOFT_TOGGLE_DIM:
+        return OT_AD_TOG_SOFT
+    if d0 == OUT_HW_NR_IS_TIMER:
+        return OT_ADT
+    return OT_NO
+
+def get_function_and_address_count(pin_typ: int) -> tuple[int, int]:
+    """
+    Corresponds to the Pascal function TypToFunktionsAnzahl.
+    Returns the number of functions and target addresses for a channel type.
+    
+    Returns:
+        (number_of_functions, number_of_addresses_per_function)
+    """
+
+    # No function available
+    if pin_typ in (0,):
+        return 0, 0
+
+    # Only function 1, one target address
+    elif pin_typ in (2, 3, 6, 9, 12):
+        return 1, 1
+
+    # Only function 1, two target addresses (e.g. for covers) (z. B. bei Rollläden)
+    elif pin_typ in (1, 19):
+        return 1, 2
+
+    # Two functions, one address each (e.g. button short/long) (z. B. Taste kurz/lang)
+    elif pin_typ in (8,):
+        return 2, 1
+
+    # Default case: 2 functions, 4 addresses (e.g. button short/long + up/down) (z. B. Taste kurz/lang + Auf/Ab)
+    else:
+        return 2, 4
+
+
+
