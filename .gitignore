@@ -4,7 +4,9 @@ cursor.json
 scripts/pre-commit-version-bump.py
 .gitattributes
 /custom_components/net4home/.gitattributes
-
+/docs
+/working
+/scripts
 
 # Python
 __pycache__/
