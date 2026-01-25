@@ -1,135 +1,135 @@
 # Home Assistant net4home Integration
 
-This repository contains the custom component for integrating net4home devices with Home Assistant.
-The net4home integration for Home Assistant allows you to connect to net4home hardware devices.
+Dieses Repository enthält die Custom Component zur Integration von net4home-Geräten mit Home Assistant.
+Die net4home-Integration für Home Assistant ermöglicht es Ihnen, eine Verbindung zu net4home-Hardware-Geräten herzustellen.
 
-The integration of net4home in Home Assistant offers an unlimited number of possibilities for automation.  
-The simple integration of an existing installation opens up a wide range of applications in conjunction with devices from other manufacturers.
+Die Integration von net4home in Home Assistant bietet unbegrenzte Möglichkeiten für die Automatisierung.  
+Die einfache Integration einer bestehenden Installation eröffnet eine Vielzahl von Anwendungsmöglichkeiten in Verbindung mit Geräten anderer Hersteller.
 
-## Prerequisites 
+## Voraussetzungen
 
-The integration requires one net4home Bus connector.
-Each connection to a Bus connector is represented in Home Assistant as a **hub** device. After the hub is connected, net4home modules will appear as child devices. Entities are created based on the reported device type.
-The `net4home` integration allows connections to more than one Bus connector. For each connector, a new integration entry needs to be created.
+Die Integration erfordert einen net4home Bus-Connector.
+Jede Verbindung zu einem Bus-Connector wird in Home Assistant als **Hub**-Gerät dargestellt. Nachdem der Hub verbunden ist, erscheinen net4home-Module als untergeordnete Geräte. Entitäten werden basierend auf dem gemeldeten Gerätetyp erstellt.
+Die `net4home`-Integration ermöglicht Verbindungen zu mehr als einem Bus-Connector. Für jeden Connector muss ein neuer Integrations-Eintrag erstellt werden.
 
-## Features
+## Funktionen
 
-- Auto-discovery via Zeroconf
-- Manual configuration (host, port, bus password, MI, OBJADR)
-- Binary sensors (contact, motion, etc.)
-- Localization support in English, German and Spanish
-- Add modules via the options flow (module type, software version, EE text and MI)
-- Add devices via the options flow (MI and module type)
-- **Diagnostic sensors** for device configuration:
-  - **PowerUp status** for switches and lights (dimmers) - shows the power-up behavior after power loss
-  - **Minimum brightness** for dimmers - displays the configured minimum brightness percentage
-  - **Timer** for timer actuators - shows the configured timer duration in seconds
-  - **Run time** for covers (jalousies) - displays the configured run time in seconds
-- **Options flow** allows updating MI and OBJADR without reconfiguration
-- **Manual ENUM_ALL trigger** via options flow for device discovery
+- Auto-Erkennung über Zeroconf
+- Manuelle Konfiguration (Host, Port, Bus-Passwort, MI, OBJADR)
+- Binäre Sensoren (Kontakt, Bewegung, etc.)
+- Lokalisierungsunterstützung in Englisch, Deutsch und Spanisch
+- Module über den Options-Flow hinzufügen (Modultyp, Software-Version, EE-Text und MI)
+- Geräte über den Options-Flow hinzufügen (MI und Modultyp)
+- **Diagnose-Sensoren** für Gerätekonfiguration:
+  - **PowerUp-Status** für Schalter und Lampen (Dimmer) - zeigt das Einschaltverhalten nach Stromausfall
+  - **Minimale Helligkeit** für Dimmer - zeigt die konfigurierte minimale Helligkeit in Prozent
+  - **Timer** für Timer-Aktoren - zeigt die konfigurierte Timer-Dauer in Sekunden
+  - **Laufzeit** für Jalousien - zeigt die konfigurierte Laufzeit in Sekunden
+- **Options-Flow** ermöglicht die Aktualisierung von MI und OBJADR ohne Neu-Konfiguration
+- **Manueller ENUM_ALL-Trigger** über den Options-Flow zur Geräteerkennung
 
 ## Installation
 
-### HACS Installation (Recommended)
+### HACS-Installation (Empfohlen)
 
-To install this integration via HACS (Home Assistant Community Store), use this button:
+Um diese Integration über HACS (Home Assistant Community Store) zu installieren, verwenden Sie diese Schaltfläche:
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=anynode&repo=net4home&category=integration)
 
-After installation via HACS:
-1. Restart Home Assistant
-2. Go to Settings → Devices & Services → Add Integration
-3. Search for "net4home" and follow the setup wizard
+Nach der Installation über HACS:
+1. Starten Sie Home Assistant neu
+2. Gehen Sie zu Einstellungen → Geräte & Dienste → Integration hinzufügen
+3. Suchen Sie nach "net4home" und folgen Sie dem Setup-Assistenten
 
-### Manual Installation
+### Manuelle Installation
 
-If you prefer to install manually, follow these steps:
-1. Copy the `net4home` folder into your Home Assistant configuration directory under `custom_components/`:
+Wenn Sie die Installation manuell bevorzugen, folgen Sie diesen Schritten:
+1. Kopieren Sie den `net4home`-Ordner in Ihr Home Assistant Konfigurationsverzeichnis unter `custom_components/`:
    ```
    custom_components/net4home/
    ```
-2. Restart Home Assistant
-3. Go to Settings → Devices & Services → Add Integration
-4. Search for "net4home" and follow the setup wizard
+2. Starten Sie Home Assistant neu
+3. Gehen Sie zu Einstellungen → Geräte & Dienste → Integration hinzufügen
+4. Suchen Sie nach "net4home" und folgen Sie dem Setup-Assistenten
 
-## Configuration
+## Konfiguration
 
-The net4home Bus connector can be auto-discovered by Home Assistant. If an instance was found, it will be shown as Discovered. You can then set it up right away.
+Der net4home Bus-Connector kann von Home Assistant automatisch erkannt werden. Wenn eine Instanz gefunden wurde, wird sie als "Gefunden" angezeigt. Sie können sie dann direkt einrichten.
 
-### Initial Setup
+### Ersteinrichtung
 
-During the initial setup, you can configure:
-- **Host**: IP address or hostname of the Bus connector
-- **Port**: TCP port (default: 3478)
-- **Password**: Bus password
-- **MI**: Module ID (default: 1)
-- **OBJADR**: Object address (default: 1)
-- **Discover**: Option to trigger ENUM_ALL during setup
+Während der Ersteinrichtung können Sie konfigurieren:
+- **Host**: IP-Adresse oder Hostname des Bus-Connectors
+- **Port**: TCP-Port (Standard: 3478)
+- **Passwort**: Bus-Passwort
+- **MI**: Modul-ID (Standard: 1)
+- **OBJADR**: Objektadresse (Standard: 1)
+- **Erkennen**: Option zum Auslösen von ENUM_ALL während des Setups
 
-### Options
+### Optionen
 
-After the integration is set up, you can access the options via:
-Settings → Devices & Services → net4home → Configure
+Nachdem die Integration eingerichtet wurde, können Sie die Optionen über folgendes aufrufen:
+Einstellungen → Geräte & Dienste → net4home → Konfigurieren
 
-In the options, you can:
-- **Update MI**: Change the Module ID without reconfiguration
-- **Update OBJADR**: Change the Object Address without reconfiguration
-- **Trigger ENUM_ALL**: Manually trigger device discovery
+In den Optionen können Sie:
+- **MI aktualisieren**: Modul-ID ändern ohne Neu-Konfiguration
+- **OBJADR aktualisieren**: Objektadresse ändern ohne Neu-Konfiguration
+- **ENUM_ALL auslösen**: Geräteerkennung manuell auslösen
 
-## Supported device types 
+## Unterstützte Gerätetypen
 
-- **Binary_sensor**: Contact sensors, motion detectors, and other binary inputs
-- **Climate**: Thermostat and heating control (UP-TLH)
-- **Cover**: Blinds and shutters control (HS-AJ3, HS-AJ4-500, etc.)
-- **Light**: Dimmer controls with brightness support (HS-AD3, HS-AD3e, HS-AD1-1x10V)
-- **Sensor**: Temperature, humidity, and illuminance sensors
-- **Switch**: Relay switches and timer actuators (HS-AR6, UP-AR2, etc.)
+- **Binary_sensor**: Kontaktsensoren, Bewegungsmelder und andere binäre Eingänge
+- **Climate**: Thermostat und Heizungssteuerung (UP-TLH)
+- **Cover**: Jalousien- und Rollladensteuerung (HS-AJ3, HS-AJ4-500, etc.)
+- **Light**: Dimmer-Steuerungen mit Helligkeitsunterstützung (HS-AD3, HS-AD3e, HS-AD1-1x10V)
+- **Sensor**: Temperatur-, Feuchtigkeits- und Beleuchtungsstärke-Sensoren
+- **Switch**: Relais-Schalter und Timer-Aktoren (HS-AR6, UP-AR2, etc.)
 
-> The implemented platforms do not cover the whole functionality of
-> the net4home system.  Therefore the net4home integration offers a
-> variety of events, device triggers and actions.  They are ideal to be
-> used in automation scripts or for the template platforms.
+> Die implementierten Plattformen decken nicht die gesamte Funktionalität des
+> net4home-Systems ab. Daher bietet die net4home-Integration eine
+> Vielzahl von Ereignissen, Geräte-Triggern und Aktionen. Diese sind ideal
+> für die Verwendung in Automatisierungsskripten oder für Template-Plattformen.
 
-## Diagnostic Information
+## Diagnoseinformationen
 
-The integration provides diagnostic sensors for each device type to display configuration information:
+Die Integration stellt Diagnose-Sensoren für jeden Gerätetyp zur Anzeige von Konfigurationsinformationen bereit:
 
-### Switches and Lights
-- **PowerUp**: Shows the power-up behavior after power loss:
+### Schalter und Lampen
+- **PowerUp**: Zeigt das Einschaltverhalten nach Stromausfall:
   - AUS (OFF)
   - EIN (ON)
   - wie vor Stromausfall (as before power loss)
   - keine Änderung (no change)
-  - EIN mit 100% (ON with 100% - dimmers only)
+  - EIN mit 100% (ON with 100% - nur Dimmer)
 
-### Lights (Dimmers)
-- **PowerUp**: Power-up behavior (see above)
-- **Minimum brightness**: Configured minimum brightness in percent (0-100%)
+### Lampen (Dimmer)
+- **PowerUp**: Einschaltverhalten (siehe oben)
+- **Minimale Helligkeit**: Konfigurierte minimale Helligkeit in Prozent (0-100%)
 
-### Timer Actuators
-- **PowerUp**: Power-up behavior (see above)
-- **Timer**: Configured timer duration in seconds
+### Timer-Aktoren
+- **PowerUp**: Einschaltverhalten (siehe oben)
+- **Timer**: Konfigurierte Timer-Dauer in Sekunden
 
-### Covers (Jalousies)
-- **Run time**: Configured run time in seconds
+### Jalousien
+- **Laufzeit**: Konfigurierte Laufzeit in Sekunden
 
-All diagnostic sensors are automatically updated when the device configuration is read from the bus.
+Alle Diagnose-Sensoren werden automatisch aktualisiert, wenn die Gerätekonfiguration vom Bus gelesen wird.
 
-## Setting up devices and entities
+## Einrichten von Geräten und Entitäten
 
-The `net4home` hardware modules are represented by Home Assistant _devices_. The periphery of each `net4home` module is represented by Home Assistant _entities_. Peripheries are, for example, the output ports, relays, and variables of a module.
+Die `net4home`-Hardware-Module werden durch Home Assistant _Geräte_ dargestellt. Die Peripherie jedes `net4home`-Moduls wird durch Home Assistant _Entitäten_ dargestellt. Peripherien sind beispielsweise die Ausgangsports, Relais und Variablen eines Moduls.
 
-## Requirements
+## Anforderungen
 
-To ensure stable and flawless functioning, the configuration in the net4home configurator should first be revised. 
+Um eine stabile und fehlerfreie Funktionsweise zu gewährleisten, sollte die Konfiguration im net4home-Konfigurator zunächst überprüft werden.
 
-Actually, everything should already be configured correctly. However, experience shows that we have to do a bit of rework here, as people have often retrofitted or adapted something. Over the years, there are certainly some things that can be tidied up with just a few clicks. This is the most important part of a clean integration. Reworking later is very time-consuming.
+Eigentlich sollte bereits alles korrekt konfiguriert sein. Die Erfahrung zeigt jedoch, dass wir hier etwas nacharbeiten müssen, da oft etwas nachgerüstet oder angepasst wurde. Über die Jahre gibt es sicherlich einige Dinge, die mit wenigen Klicks aufgeräumt werden können. Dies ist der wichtigste Teil einer sauberen Integration. Eine spätere Nacharbeit ist sehr zeitaufwändig.
 
-> Changes to status changes have no influence on the existing functions.
+> Änderungen an Statusänderungen haben keinen Einfluss auf die bestehenden Funktionen.
 
-The **status change** flag must be set for the following actuators. This is important so that the HA always receives information about the current status for display. If, for example, a light is switched by a normal switch, the HA has no information here. There is also the status change, which is communicated to other bus devices.
+Das Flag **Statusänderung** muss für die folgenden Aktoren gesetzt werden. Dies ist wichtig, damit die HA immer Informationen über den aktuellen Status zur Anzeige erhält. Wenn beispielsweise eine Lampe durch einen normalen Schalter geschaltet wird, hat die HA hier keine Information. Es gibt auch die Statusänderung, die an andere Bus-Geräte kommuniziert wird.
 
-The following modules are to be checked:
+Die folgenden Module sind zu überprüfen:
 - HS-AR6
 - UP-AR2
 - HS-AJ3
@@ -137,18 +137,18 @@ The following modules are to be checked:
 - HS-AD3
 - HS-AD3e
 
-## Services
+## Dienste
 
-The integration provides the following custom services:
+Die Integration stellt die folgenden benutzerdefinierten Dienste bereit:
 
-- `net4home.debug_devices`: Log all registered devices to the Home Assistant log
-- `net4home.clear_devices`: Clear all stored devices from the integration
-- `net4home.enum_all`: Trigger device discovery (ENUM_ALL command)
+- `net4home.debug_devices`: Protokolliert alle registrierten Geräte im Home Assistant-Log
+- `net4home.clear_devices`: Löscht alle gespeicherten Geräte aus der Integration
+- `net4home.enum_all`: Löst die Geräteerkennung aus (ENUM_ALL-Befehl)
 
 ## Version
 
-Current version: **1.3.0**
+Aktuelle Version: **1.3.0**
 
 ## Support
 
-For issues, feature requests, or contributions, please visit the [GitHub repository](https://github.com/anynode/net4home).
+Für Probleme, Funktionswünsche oder Beiträge besuchen Sie bitte das [GitHub-Repository](https://github.com/anynode/net4home).
