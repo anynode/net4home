@@ -1384,63 +1384,66 @@ class Net4HomeApi:
                                     # 1.5. HS-Time: Modul-Info (ddata[1] = $FF) - Basisadresse lesen
                                     if model == "HS-Time" and b1 == 0xFF:
                                         _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK HS-Time -> FF (Modul-Info)")
-                                if len(paket.ddata) >= 5:
-                                    # Laut Dokumentation: ddata[2] = Objektadresse High, ddata[3] = Objektadresse Low
-                                    objadr_high = paket.ddata[2]
-                                    objadr_low = paket.ddata[3]
-                                    objadr = (objadr_high << 8) + objadr_low
-                                    # ddata[4] = Broadcast-Index (0-7)
-                                    broadcast_index = paket.ddata[4]
-                                    _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK HS-Time 0xFF: objadr={objadr}, broadcast_index={broadcast_index}")
-                                    # Speichere objadr im device Objekt
-                                    device.objadr = objadr
-                                    
-                                    # Broadcast-Intervall-Mapping (laut korrigierter Dokumentation)
-                                    broadcast_intervals = {
-                                        0: "Nie",
-                                        1: "1 Minute",
-                                        2: "5 Minuten",
-                                        3: "15 Minuten",
-                                        4: "30 Minuten",
-                                        5: "60 Minuten",
-                                        6: "2 Stunden",
-                                        7: "4 Stunden",
-                                        8: "8 Stunden",
-                                        9: "12 Stunden",
-                                        10: "24 Stunden"
-                                    }
-                                    broadcast_interval_str = broadcast_intervals.get(broadcast_index, f"Unbekannt ({broadcast_index})")
-                                    
-                                    # Sende Broadcast-Intervall direkt an das MI-Device (wie bei UP-TLH)
-                                    # WICHTIG: sensor_key ist "broadcast interval" (mit Leerzeichen), aber Dispatcher-Key verwendet slugify
-                                    dispatcher_key_dict = f"net4home_update_{device_id}"
-                                    dispatcher_key_sensor = f"net4home_update_{device_id}_{slugify('broadcast interval')}"
-                                    async_dispatcher_send(self._hass, dispatcher_key_dict, {"broadcast interval": broadcast_interval_str})
-                                    async_dispatcher_send(self._hass, dispatcher_key_sensor, broadcast_interval_str)
-                                    _LOGGER.debug(f"HS-Time: Broadcast Interval for {device_id}: index={broadcast_index}, value='{broadcast_interval_str}', keys: {dispatcher_key_dict}, {dispatcher_key_sensor}")
-                                    
-                                    # Store Sunrise/Sunset object addresses for later D0_VALUE_REQ queries
-                                    sunrise_objadr = objadr + 17
-                                    sunset_objadr = objadr + 18
-                                    
-                                    # Send D0_VALUE_REQ for Sunrise and Sunset (values are stored directly on MI device)
-                                    await self._packet_sender.send_raw_command(
-                                        ipdst=sunrise_objadr,
-                                        ddata=bytes([D0_VALUE_REQ, 0x00, 0x00]),
-                                        objsource=self._objadr,
-                                        mi=self._mi,
-                                    )
-                                    await asyncio.sleep(0.1)
-                                    await self._packet_sender.send_raw_command(
-                                        ipdst=sunset_objadr,
-                                        ddata=bytes([D0_VALUE_REQ, 0x00, 0x00]),
-                                        objsource=self._objadr,
-                                        mi=self._mi,
-                                    )
-                                    _LOGGER.debug(f"HS-Time: Sent D0_VALUE_REQ for Sunrise/Sunset (objadr={objadr}, sunrise={sunrise_objadr}, sunset={sunset_objadr})")
-                                else:
-                                    _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for HS-Time 0xFF: {len(paket.ddata)} bytes")
-                                continue
+                                        if len(paket.ddata) >= 5:
+                                            # Laut Dokumentation: ddata[2] = Objektadresse High, ddata[3] = Objektadresse Low
+                                            objadr_high = paket.ddata[2]
+                                            objadr_low = paket.ddata[3]
+                                            objadr = (objadr_high << 8) + objadr_low
+                                            # ddata[4] = Broadcast-Index (0-7)
+                                            broadcast_index = paket.ddata[4]
+                                            _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK HS-Time 0xFF: objadr={objadr}, broadcast_index={broadcast_index}")
+                                            # Speichere objadr im device Objekt
+                                            if device:
+                                                device.objadr = objadr
+                                                
+                                                # Broadcast-Intervall-Mapping (laut korrigierter Dokumentation)
+                                                broadcast_intervals = {
+                                                    0: "Nie",
+                                                    1: "1 Minute",
+                                                    2: "5 Minuten",
+                                                    3: "15 Minuten",
+                                                    4: "30 Minuten",
+                                                    5: "60 Minuten",
+                                                    6: "2 Stunden",
+                                                    7: "4 Stunden",
+                                                    8: "8 Stunden",
+                                                    9: "12 Stunden",
+                                                    10: "24 Stunden"
+                                                }
+                                                broadcast_interval_str = broadcast_intervals.get(broadcast_index, f"Unbekannt ({broadcast_index})")
+                                                
+                                                # Sende Broadcast-Intervall direkt an das MI-Device (wie bei UP-TLH)
+                                                # WICHTIG: sensor_key ist "broadcast interval" (mit Leerzeichen), aber Dispatcher-Key verwendet slugify
+                                                dispatcher_key_dict = f"net4home_update_{device_id}"
+                                                dispatcher_key_sensor = f"net4home_update_{device_id}_{slugify('broadcast interval')}"
+                                                async_dispatcher_send(self._hass, dispatcher_key_dict, {"broadcast interval": broadcast_interval_str})
+                                                async_dispatcher_send(self._hass, dispatcher_key_sensor, broadcast_interval_str)
+                                                _LOGGER.debug(f"HS-Time: Broadcast Interval for {device_id}: index={broadcast_index}, value='{broadcast_interval_str}', keys: {dispatcher_key_dict}, {dispatcher_key_sensor}")
+                                                
+                                                # Store Sunrise/Sunset object addresses for later D0_VALUE_REQ queries
+                                                sunrise_objadr = objadr + 17
+                                                sunset_objadr = objadr + 18
+                                                
+                                                # Send D0_VALUE_REQ for Sunrise and Sunset (values are stored directly on MI device)
+                                                await self._packet_sender.send_raw_command(
+                                                    ipdst=sunrise_objadr,
+                                                    ddata=bytes([D0_VALUE_REQ, 0x00, 0x00]),
+                                                    objsource=self._objadr,
+                                                    mi=self._mi,
+                                                )
+                                                await asyncio.sleep(0.1)
+                                                await self._packet_sender.send_raw_command(
+                                                    ipdst=sunset_objadr,
+                                                    ddata=bytes([D0_VALUE_REQ, 0x00, 0x00]),
+                                                    objsource=self._objadr,
+                                                    mi=self._mi,
+                                                )
+                                                _LOGGER.debug(f"HS-Time: Sent D0_VALUE_REQ for Sunrise/Sunset (objadr={objadr}, sunrise={sunrise_objadr}, sunset={sunset_objadr})")
+                                            else:
+                                                _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK HS-Time 0xFF: Device {device_id} not found, cannot set objadr")
+                                        else:
+                                            _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for HS-Time 0xFF: {len(paket.ddata)} bytes")
+                                        continue
                             
                             # 1.6. LCD3 (UP-LCD): b1..b2 = Adresse (Big Endian), $FFFF = Kapazitäts-Info
                             # IMPORTANT: Check LCD BEFORE SensorConfig/PIR to avoid conflicts with b1 == 0
