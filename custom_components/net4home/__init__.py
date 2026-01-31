@@ -8,12 +8,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .models import Net4HomeDevice
-from .const import DOMAIN
+from .const import DOMAIN, CONF_AUTO_DISCOVERY
 from .api import Net4HomeApi
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["light", "switch", "cover", "binary_sensor", "climate", "sensor", "button", "alarm_control_panel"]
+PLATFORMS = ["light", "switch", "cover", "binary_sensor", "climate", "sensor", "button", "select", "alarm_control_panel"]
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the net4home integration."""
@@ -34,6 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
             objadr=entry.options.get("OBJADR", entry.data.get("OBJADR")),
             entry_id=entry.entry_id,
             entry=entry,
+            auto_discovery_enabled=entry.data.get(CONF_AUTO_DISCOVERY, True),
         )
 
         stored_devices = entry.options.get("devices", {})
@@ -60,14 +61,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
             na = dev.get("na")
             nm = dev.get("nm")
             ng = dev.get("ng")
+            # Migration: UP-T/UP-TLH stored as "module" should be treated as "climate"
+            device_type = dev["device_type"]
+            if device_type == "module" and dev.get("model") in ("UP-T", "UP-TLH"):
+                device_type = "climate"
             
+            # Normalize device_id to uppercase so API lookups (e.g. from packet device_id) and dispatcher keys match
+            normalized_device_id = (dev["device_id"] or "").upper()
             device = Net4HomeDevice(
-                device_id=dev["device_id"],
+                device_id=normalized_device_id,
                 name=dev["name"],
                 model=dev["model"],
-                device_type=dev["device_type"],
+                device_type=device_type,
                 via_device=dev.get("via_device"),
-                objadr=dev.get("objadr", int(dev["device_id"][3:]) if dev["device_id"].startswith("OBJ") else None),
+                objadr=dev.get("objadr", int(dev["device_id"][3:]) if (dev["device_id"] or "").startswith("OBJ") else None),
                 send_state_changes=dev.get("send_state_changes", False),
                 detail_status=detail_status,
                 detail_retry_count=detail_retry_count,
@@ -78,7 +85,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
                 nm=nm,
                 ng=ng,
             )
-            api.devices[device.device_id] = device
+            api.devices[normalized_device_id] = device
             _LOGGER.debug(f"Loaded device from config: {device.device_id} ({device.device_type}, detail_status: {detail_status})")
             
             # Register only modules in Device Registry on startup
@@ -99,6 +106,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
 
         hass.data[DOMAIN][entry.entry_id] = api
         _LOGGER.info(f"Loaded {len(api.devices)} devices from config before platform setup: {[d.device_id for d in api.devices.values()]}")
+
+        async def _update_listener(hass_arg: HomeAssistant, config_entry: config_entries.ConfigEntry) -> None:
+            """Update running API when config entry (e.g. auto_discovery) is changed from options flow."""
+            api_instance = hass_arg.data.get(DOMAIN, {}).get(config_entry.entry_id)
+            if api_instance:
+                api_instance._auto_discovery_enabled = config_entry.data.get(CONF_AUTO_DISCOVERY, True)
+                _LOGGER.info(
+                    "[net4home] Updated auto_discovery_enabled to %s for entry %s",
+                    api_instance._auto_discovery_enabled,
+                    config_entry.entry_id,
+                )
+        remove_listener = entry.add_update_listener(_update_listener)
+        entry.async_on_unload(remove_listener)
+
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         _LOGGER.info(f"Platform setup completed. Devices in API: {len(api.devices)}")
 
@@ -148,6 +169,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
         
         # Start detail queue manager for load-balanced detail queries
         await api.async_start_detail_retrieval()
+        
+        # Wait a few seconds for the detail queue to process pending devices
+        # before activating all sensors
+        await asyncio.sleep(5)
+        
+        # Activate all known sensors with D0_REQ to trigger initial value broadcasts
+        # This ensures sensors that were previously registered will send their current values
+        await api.async_activate_all_sensors()
+
+        # Refresh presetday/presetnight for UP-TLH/UP-T loaded from config (0xF0 is not re-requested when detail_status=completed)
+        await api.async_refresh_preset_values_up_tlh()
 
         # Debug service
         async def handle_debug_devices(call):

@@ -10,7 +10,21 @@
           "password": "Password",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "discover": "Enum bus modules"
+          "discover": "Enum bus modules",
+          "auto_discovery": "Auto-discover unknown devices"
+        }
+      },
+      "ip": {
+        "title": "Connect net4home",
+        "description": "Enter the connection details for the net4home bus connector.",
+        "data": {
+          "host": "Host",
+          "port": "Port (3478)",
+          "password": "Password",
+          "MI": "MI",
+          "OBJADR": "OBJADR",
+          "discover": "Enum bus modules",
+          "auto_discovery": "Auto-discover unknown devices"
         }
       }
     },
@@ -39,7 +53,8 @@
           "module_mi": "Module MI",
           "device_module_type": "Device Module Type",
           "device_mi": "Device MI",
-          "trigger_enum_all": "Enum bus modules"
+          "trigger_enum_all": "Enum bus modules",
+          "auto_discovery": "Auto-discover unknown devices"
         }
       }
     },
@@ -58,7 +73,14 @@
     "broadcast interval": "Broadcast Interval"
   },
   "button": {
-    "read_device": "Read Device"
+    "read_device": "Read Device",
+    "bell_on": "On",
+    "bell_off": "Off",
+    "bell_vol_up": "Volume Up",
+    "bell_vol_down": "Volume Down"
+  },
+  "select": {
+    "bell_track": "Track"
   },
   "device_automation": {
     "trigger_type": {
