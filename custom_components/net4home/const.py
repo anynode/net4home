@@ -18,6 +18,7 @@ DEFAULT_MI = 65281
 DEFAULT_OBJADR = 32700
 CONF_MI = "MI"
 CONF_OBJADR = "OBJADR"
+CONF_AUTO_DISCOVERY = "auto_discovery"
 
 N4H_IP_PORT                         = 3478
 N4H_BJ_NAME_BUSCONNECTOR  =  "_n4hbuscon._tcp"
@@ -452,6 +453,10 @@ CI_LCD_OPT_LICHT_LANG_EIN = 0x08  # Licht lang ein
 CI_LCD_OPT_BUZZER_ON = 0x10  # Buzzer an
 CI_LCD_OPT_LFCR = 0x20  # Line Feed / Carriage Return
 CI_LCD_OPT_USE_XY = 0x40  # X/Y-Position verwenden
+
+# --- WAV-Bell track options (ddata[2] for D0_SET_N track play) ---
+D2_OPT_DNR = 0x40  # Do Not Repeat – Track nicht wiederholen (nur 1×)
+D2_OPT_INTERRUPT = 0x80  # Laufenden Track unterbrechen und neuen starten
 
 # LCD String lengths
 LCD_STR_LEN_1 = 24  # Standard LCD string length

@@ -10,7 +10,21 @@
           "password": "Contraseña",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "discover": "Enumerar módulos del bus"
+          "discover": "Enumerar módulos del bus",
+          "auto_discovery": "Detectar automáticamente dispositivos desconocidos"
+        }
+      },
+      "ip": {
+        "title": "Conectar net4home",
+        "description": "Introduce los detalles de conexión para el conector de bus de net4home.",
+        "data": {
+          "host": "Host",
+          "port": "Puerto (3478)",
+          "password": "Contraseña",
+          "MI": "MI",
+          "OBJADR": "OBJADR",
+          "discover": "Enumerar módulos del bus",
+          "auto_discovery": "Detectar automáticamente dispositivos desconocidos"
         }
       }
     },
@@ -39,7 +53,8 @@
           "module_mi": "MI del módulo",
           "device_module_type": "Tipo de módulo del dispositivo",
           "device_mi": "MI del dispositivo",
-          "trigger_enum_all": "Enumerar módulos del bus"
+          "trigger_enum_all": "Enumerar módulos del bus",
+          "auto_discovery": "Detectar automáticamente dispositivos desconocidos"
         }
       }
     },
@@ -58,7 +73,14 @@
     "broadcast interval": "Intervalo de Difusión"
   },
   "button": {
-    "read_device": "Leer Dispositivo"
+    "read_device": "Leer Dispositivo",
+    "bell_on": "Encender",
+    "bell_off": "Apagar",
+    "bell_vol_up": "Subir volumen",
+    "bell_vol_down": "Bajar volumen"
+  },
+  "select": {
+    "bell_track": "Pista"
   },
   "device_automation": {
     "trigger_type": {

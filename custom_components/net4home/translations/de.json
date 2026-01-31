@@ -10,7 +10,21 @@
           "password": "Passwort",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "discover": "Busmodule ermitteln"
+          "discover": "Busmodule ermitteln",
+          "auto_discovery": "Unbekannte Geräte automatisch erkennen"
+        }
+      },
+      "ip": {
+        "title": "net4home verbinden",
+        "description": "Gib die Verbindungsdaten zum net4home Busconnector ein.",
+        "data": {
+          "host": "Host",
+          "port": "Port (3478)",
+          "password": "Passwort",
+          "MI": "MI",
+          "OBJADR": "OBJADR",
+          "discover": "Busmodule ermitteln",
+          "auto_discovery": "Unbekannte Geräte automatisch erkennen"
         }
       }
     },
@@ -39,7 +53,8 @@
           "module_mi": "Modul-MI",
           "device_module_type": "Gerätemodultyp",
           "device_mi": "Geräte-MI",
-          "trigger_enum_all": "Busmodule ermitteln"
+          "trigger_enum_all": "Busmodule ermitteln",
+          "auto_discovery": "Unbekannte Geräte automatisch erkennen"
         }
       }
     },
@@ -58,7 +73,14 @@
     "broadcast interval": "Broadcast-Intervall"
   },
   "button": {
-    "read_device": "Lese Modul"
+    "read_device": "Lese Modul",
+    "bell_on": "EIN",
+    "bell_off": "AUS",
+    "bell_vol_up": "LAUTER",
+    "bell_vol_down": "LEISER"
+  },
+  "select": {
+    "bell_track": "Spur"
   },
   "device_automation": {
     "trigger_type": {

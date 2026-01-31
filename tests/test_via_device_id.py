@@ -33,6 +33,7 @@ class ViaDeviceIdTest(unittest.TestCase):
                 "cover.py",
                 "diagnostic_sensor.py",
                 "light.py",
+                "select.py",
                 "sensor.py",
                 "switch.py",
             ],

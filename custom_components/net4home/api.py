@@ -79,6 +79,9 @@ from .const import (
     CI_LCD_OPT_BUZZER_ON,
     LCD_STR_LEN_1,
     PLATINE_HW_IS_LCD3,
+    PLATINE_HW_IS_BELL2,
+    D2_OPT_INTERRUPT,
+    D2_OPT_DNR,
 )
 
 
@@ -1513,7 +1516,39 @@ class Net4HomeApi:
                                         else:
                                             _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for LCD3: {len(paket.ddata)} bytes")
                                         continue
-                            
+
+                                    # WAV-Bell (PLATINE_HW_IS_BELL2): First line = TCFG, bytes 0-1 = AdrUK (Basis-Objektadresse)
+                                    # Some firmware sends first config line with line_index=0x1E (30), not 0
+                                    elif model == ".WAV-Bell" or device.module_type == PLATINE_HW_IS_BELL2:
+                                        if len(paket.ddata) >= 5:
+                                            line_index = (paket.ddata[1] << 8) | paket.ddata[2]  # Big Endian
+                                            if line_index == 0 or line_index == 0x1E:
+                                                # TCFG: AdrUK at ddata[2:4] (Big Endian), e.g. 0x1E 0x15 = 7701
+                                                adr_uk = (paket.ddata[2] << 8) | paket.ddata[3]
+                                                device.objadr = adr_uk
+                                                _LOGGER.info(
+                                                    f"D0_RD_MODULSPEC_DATA_ACK WAV-Bell config (line 0) for {device_id}: "
+                                                    f"adrUK={adr_uk:04X} (OBJ={adr_uk}), packet_len={len(paket.ddata)} bytes"
+                                                )
+                                                async_dispatcher_send(self._hass, f"net4home_device_updated_{self._entry.entry_id}", device_id)
+                                                try:
+                                                    devices = dict(self._entry.options.get("devices", {}))
+                                                    if device_id in devices:
+                                                        devices[device_id]["objadr"] = adr_uk
+                                                        new_options = dict(self._entry.options)
+                                                        new_options["devices"] = devices
+                                                        self._hass.config_entries.async_update_entry(self._entry, options=new_options)
+                                                        _LOGGER.debug(f"Saved objadr={adr_uk} for {device_id} to config entry (WAV-Bell)")
+                                                except Exception as e:
+                                                    _LOGGER.error(f"Failed to save objadr for {device_id}: {e}")
+                                            else:
+                                                _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK WAV-Bell line for {device_id}: line_index={line_index}")
+                                        else:
+                                            _LOGGER.warning(
+                                                f"D0_RD_MODULSPEC_DATA_ACK packet too short for WAV-Bell: {len(paket.ddata)} bytes"
+                                            )
+                                        continue
+
                                     # 5. IR_TX: b1 = $FF = Modul-Info, b1 < $80 = Tabelle, b1 >= $C0 = MaxPower
                                     elif model and 'IR' in model.upper() and 'TX' in model.upper():
                                         if b1 == 0xFF:
@@ -1795,6 +1830,78 @@ class Net4HomeApi:
 
         except Exception as e:
             _LOGGER.error(f"Error turning ON for {device_id}: {e}")
+
+    async def async_send_bell_command(self, device_id: str, command: str) -> None:
+        """Send a WAV-Bell on, off, or volume command to the module object address."""
+        device = self.get_known_device(device_id)
+        if not device:
+            _LOGGER.warning(f"WAV-Bell: device {device_id} not found")
+            return
+        objadr = device.objadr
+        if objadr is None:
+            _LOGGER.warning(
+                f"No objadr for WAV-Bell {device_id}. Use Read Device first to load object address (AdrUK)."
+            )
+            return
+        if command == "ON":
+            ddata = bytes([D0_SET, 101, 0])
+        elif command == "OFF":
+            ddata = bytes([D0_SET, 102, 0])
+        elif command == "INC_VOL":
+            ddata = bytes([D0_INC, 0, 0])
+        elif command == "DEC_VOL":
+            ddata = bytes([D0_DEC, 0, 0])
+        else:
+            _LOGGER.warning(f"WAV-Bell: unknown command {command}")
+            return
+        await self._packet_sender.send_raw_command(
+            ipdst=objadr,
+            ddata=ddata,
+            objsource=self._objadr,
+            mi=self._mi,
+            type8=SEND_AS_OBJ_GRP,
+        )
+        _LOGGER.debug(f"WAV-Bell command {command} sent to {device_id} (OBJ={objadr})")
+
+    async def async_send_bell_track(
+        self,
+        device_id: str,
+        track: int,
+        repeats: int = 1,
+        interrupt: bool = True,
+        dnr: bool = False,
+    ) -> None:
+        """Play a WAV-Bell track with D0_SET_N. Track is 0–31."""
+        device = self.get_known_device(device_id)
+        if not device:
+            _LOGGER.warning(f"WAV-Bell: device {device_id} not found")
+            return
+        objadr = device.objadr
+        if objadr is None:
+            _LOGGER.warning(
+                f"No objadr for WAV-Bell {device_id}. Use Read Device first to load object address (AdrUK)."
+            )
+            return
+        if not 0 <= track <= 31:
+            _LOGGER.warning(f"WAV-Bell: track must be 0–31, got {track}")
+            return
+        repeats_val = max(1, min(16, repeats))
+        byte2 = (repeats_val - 1) & 0x0F
+        if interrupt:
+            byte2 |= D2_OPT_INTERRUPT
+        if dnr:
+            byte2 |= D2_OPT_DNR
+        ddata = bytes([D0_SET_N, track, byte2])
+        await self._packet_sender.send_raw_command(
+            ipdst=objadr,
+            ddata=ddata,
+            objsource=self._objadr,
+            mi=self._mi,
+            type8=SEND_AS_OBJ_GRP,
+        )
+        _LOGGER.debug(
+            f"WAV-Bell track {track} (repeats={repeats_val}, byte2=0x{byte2:02X}) sent to {device_id} (OBJ={objadr})"
+        )
 
     async def async_turn_off_switch(self, device_id: str):
         """Send an OFF signal to the specified switch device."""
