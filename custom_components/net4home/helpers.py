@@ -37,6 +37,86 @@ def decode_powerup_status(powerup_index: Optional[int]) -> str:
     
     return powerup_map.get(powerup_index, f"unknown ({powerup_index})")
 
+
+def registry_device_id(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    device_id: str | None,
+) -> str | None:
+    """Return the device-registry id for a net4home device id."""
+    if not device_id:
+        return None
+    try:
+        return dr.async_get_device_id_by_identifier(
+            hass,
+            (DOMAIN, device_id.upper()),
+            config_entry_id=config_entry_id,
+        )
+    except ValueError:
+        return None
+
+
+def parent_device_link(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    parent_device_id: str | None,
+) -> dict[str, str]:
+    """DeviceInfo kwargs that link a child to its parent module.
+
+    Home Assistant 2026.8 no longer accepts ``via_device``. The value is the
+    registry id of the parent, looked up from our own module id.
+    """
+    parent_id = registry_device_id(hass, config_entry_id, parent_device_id)
+    if parent_id is None:
+        if parent_device_id:
+            _LOGGER.warning(
+                "Parent device %s is not in the device registry yet",
+                parent_device_id,
+            )
+        return {}
+    return {"via_device_id": parent_id}
+
+
+def ensure_registry_device(
+    hass: HomeAssistant,
+    entry,
+    device_id: str,
+    *,
+    name: str | None = None,
+    model: str | None = None,
+    sw_version: str | None = None,
+    hw_version: str | None = None,
+    via_device: str | None = None,
+) -> str:
+    """Register a device and return its registry id.
+
+    A parent module is registered before the child that links to it.
+    """
+    parent_registry_id = None
+    if via_device and via_device.upper() != device_id.upper():
+        if registry_device_id(hass, entry.entry_id, via_device) is None:
+            ensure_registry_device(hass, entry, via_device)
+        parent_registry_id = registry_device_id(hass, entry.entry_id, via_device)
+
+    kwargs = {}
+    if parent_registry_id:
+        kwargs["via_device_id"] = parent_registry_id
+    if sw_version is not None:
+        kwargs["sw_version"] = sw_version
+    if hw_version is not None:
+        kwargs["hw_version"] = hw_version
+
+    created = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, device_id.upper())},
+        manufacturer="net4home",
+        name=name or device_id.upper(),
+        model=model,
+        **kwargs,
+    )
+    return created.id
+
+
 async def register_device_in_registry(
     hass: HomeAssistant,
     entry,
@@ -59,8 +139,17 @@ async def register_device_in_registry(
 ) -> None:
     """Register a net4home device and create the corresponding entity."""
     entry_id = entry.entry_id
-    device_registry = dr.async_get(hass)
     existing_devices = entry.options.get("devices", {})   # <--- AT THE TOP!
+    ensure_registry_device(
+        hass,
+        entry,
+        device_id,
+        name=name,
+        model=model,
+        sw_version=sw_version,
+        hw_version=hw_version,
+        via_device=via_device,
+    )
 
     # Check, if the device is already in internal registry object
     # if api and device_id in api.devices:
@@ -100,20 +189,7 @@ async def register_device_in_registry(
             _LOGGER.info(f"Updated config for device {device_id} in config entry options")
         else:
             _LOGGER.debug(f"Device {device_id} already present and up-to-date in config entry options.")
-        
-        # Update Device Registry even if device already exists
-        device_entry = device_registry.async_get_device(
-            identifiers={(DOMAIN, device_id.upper())}
-        )
-        if device_entry:
-            # Update sw_version and hw_version in Device Registry
-            device_registry.async_update_device(
-                device_entry.id,
-                sw_version=sw_version,
-                hw_version=hw_version or None,
-            )
-            _LOGGER.debug(f"Updated Device Registry for {device_id}: sw_version={sw_version}, hw_version={hw_version}")
-        
+
         # Ensure the device is also in api.devices (for powerup status etc.)
         if api and device_id not in api.devices:
             # Load existing detail_status from config if available
@@ -172,19 +248,6 @@ async def register_device_in_registry(
                 device.ng = ng
         
         return
-
-    # Register device with Home Assistant
-    # via_device is NOT set here, but in the entity itself via device_info
-    device_registry.async_get_or_create(
-        config_entry_id=entry_id,
-        identifiers={(DOMAIN, device_id)},
-        manufacturer="net4home",
-        name=name,
-        model=model,
-        sw_version=sw_version,
-        hw_version=hw_version,
-        connections=set(),
-    )
 
     _LOGGER.info(f"Registered new device: {device_type or 'unknown'} / {device_id}")
 

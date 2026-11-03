@@ -10,6 +10,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from .models import Net4HomeDevice
 from .const import DOMAIN
 from .api import Net4HomeApi
+from .helpers import ensure_registry_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,8 +38,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
         )
 
         stored_devices = entry.options.get("devices", {})
-        from homeassistant.helpers import device_registry as dr
-        
+        loaded_devices = []
+
         for dev in stored_devices.values():
             # Load detail_status from config
             detail_status = dev.get("detail_status", "pending")
@@ -79,23 +80,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
                 ng=ng,
             )
             api.devices[device.device_id] = device
+            loaded_devices.append((device, sw_version, hw_version))
             _LOGGER.debug(f"Loaded device from config: {device.device_id} ({device.device_type}, detail_status: {detail_status})")
-            
-            # Register only modules in Device Registry on startup
-            if device.device_type == "module":
-                device_registry = dr.async_get(hass)
-                device_registry.async_get_or_create(
-                    config_entry_id=entry.entry_id,
-                    identifiers={(DOMAIN, device.device_id.upper())},
-                    manufacturer="net4home",
-                    name=device.name,
-                    model=device.model,
-                    sw_version=sw_version,
-                    hw_version=hw_version,
-                    connections=set(),
-                    via_device=None,
-                )
-                _LOGGER.debug(f"Registered module device {device.device_id} in device registry on startup (sw_version={sw_version}, hw_version={hw_version})")
+
+        # Parents first, then children, so via_device_id can point at a registry id.
+        for device, sw_version, hw_version in loaded_devices:
+            if device.via_device:
+                continue
+            ensure_registry_device(
+                hass,
+                entry,
+                device.device_id,
+                name=device.name,
+                model=device.model,
+                sw_version=sw_version,
+                hw_version=hw_version,
+            )
+        for device, sw_version, hw_version in loaded_devices:
+            if not device.via_device:
+                continue
+            ensure_registry_device(
+                hass,
+                entry,
+                device.device_id,
+                name=device.name,
+                model=device.model,
+                sw_version=sw_version,
+                hw_version=hw_version,
+                via_device=device.via_device,
+            )
 
         hass.data[DOMAIN][entry.entry_id] = api
         _LOGGER.info(f"Loaded {len(api.devices)} devices from config before platform setup: {[d.device_id for d in api.devices.values()]}")

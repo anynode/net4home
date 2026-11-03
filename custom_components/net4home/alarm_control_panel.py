@@ -13,6 +13,7 @@ from homeassistant import config_entries
 from typing import Callable
 
 from .const import DOMAIN
+from .helpers import parent_device_link
 from .api import Net4HomeApi, Net4HomeDevice
 
 import logging
@@ -102,7 +103,7 @@ class Net4HomeAlarmControlPanel(AlarmControlPanelEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
     async def async_added_to_hass(self) -> None:

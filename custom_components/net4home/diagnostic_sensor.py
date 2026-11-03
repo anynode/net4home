@@ -6,7 +6,7 @@ from homeassistant.core import callback
 
 
 from .const import DOMAIN
-from .helpers import decode_powerup_status
+from .helpers import decode_powerup_status, parent_device_link
 
 # Diagnostic for inverted flag (binary_sensor)
 class Net4HomeInvertedDiagnosticSensor(SensorEntity):
@@ -37,7 +37,7 @@ class Net4HomeInvertedDiagnosticSensor(SensorEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
 # Diagnostic for send_state_changes
@@ -70,7 +70,7 @@ class Net4HomeSendStateChangesDiagnosticSensor(SensorEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
 # Diagnostic for powerup_status
@@ -119,7 +119,7 @@ class Net4HomePowerupStatusDiagnosticSensor(SensorEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
 # Diagnostic for timer_time1 (only for timer actors)
@@ -167,7 +167,7 @@ class Net4HomeTimerTime1DiagnosticSensor(SensorEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
 # Diagnostic for min_hell (only for dimmers)
@@ -216,7 +216,7 @@ class Net4HomeMinHellDiagnosticSensor(SensorEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
 # Diagnostic for timer_time1 for covers (Run time)
@@ -264,5 +264,5 @@ class Net4HomeCoverRunTimeDiagnosticSensor(SensorEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )

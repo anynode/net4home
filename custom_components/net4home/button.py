@@ -8,6 +8,7 @@ from homeassistant.util import slugify
 from .api import Net4HomeApi, Net4HomeDevice
 
 from .const import DOMAIN, PLATINE_HW_IS_LCD3, CI_LCD_OPT_BLINK, CI_LCD_OPT_BUZZER_ON
+from .helpers import parent_device_link
 
 import logging
 _LOGGER = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ class Net4HomeDeviceRefreshButton(ButtonEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
     async def async_press(self) -> None:
@@ -64,7 +65,7 @@ class Net4HomeMasterkeyLearningButton(ButtonEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
     async def async_press(self) -> None:
@@ -94,7 +95,7 @@ class Net4HomeReadDeviceConfigButton(ButtonEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
     async def async_added_to_hass(self):
@@ -131,7 +132,7 @@ class Net4HomeLCDBlinkButton(ButtonEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
     async def async_press(self) -> None:
@@ -166,7 +167,7 @@ class Net4HomeLCDBuzzerButton(ButtonEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
     async def async_press(self) -> None:

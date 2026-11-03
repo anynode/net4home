@@ -11,6 +11,7 @@ from homeassistant.util import slugify
 from homeassistant.core import callback
 
 from .const import DOMAIN
+from .helpers import parent_device_link
 from .api import Net4HomeApi, Net4HomeDevice
 from .diagnostic_sensor import Net4HomeInvertedDiagnosticSensor
 
@@ -156,7 +157,7 @@ class Net4HomeSensor(SensorEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
     async def async_added_to_hass(self):
@@ -230,7 +231,7 @@ class Net4HomeRfReaderSensor(SensorEntity):
             name=self.device.name,
             manufacturer="net4home",
             model=self.device.model,
-            via_device=(DOMAIN, self.device.via_device.upper()) if self.device.via_device else None,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
     async def async_added_to_hass(self):
