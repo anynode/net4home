@@ -2,18 +2,34 @@ import logging
 from typing import Callable
 from datetime import datetime
 
-from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
-from homeassistant.const import UnitOfTemperature, PERCENTAGE, LIGHT_LUX
+from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
+from homeassistant.const import UnitOfTemperature, PERCENTAGE, LIGHT_LUX, UnitOfTime
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.translation import async_get_translations
+from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 from homeassistant.core import callback
 
+from .alarm_extras import alarm_level_sensors
+from .hs_time import command_text, schedule_row_active
+from .bell import bell_sensors
+from .bell_layout import is_wav_bell
 from .const import DOMAIN
+from .si_extras import si_power_sensors
+from .si_layout import SI_MODEL_CHANNELS
+from .rf_keys import RF_KEY_COUNT
+from .rf_access import RfKeyDirectorySensor, store_key
 from .helpers import parent_device_link
 from .api import Net4HomeApi, Net4HomeDevice
-from .diagnostic_sensor import Net4HomeInvertedDiagnosticSensor
+from .diagnostic_sensor import (
+    Net4HomeCoverRunTimeDiagnosticSensor,
+    Net4HomeInvertedDiagnosticSensor,
+    Net4HomeMinHellDiagnosticSensor,
+    Net4HomePowerupStatusDiagnosticSensor,
+    Net4HomeSendStateChangesDiagnosticSensor,
+    Net4HomeTimerTime1DiagnosticSensor,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,6 +44,33 @@ HS_TIME_SENSOR_TYPES = [
     ("sunrise", None),  # Time string (HH:MM)
     ("sunset", None),  # Time string (HH:MM)
 ]
+
+def _actor_diagnostic_entities(entry, api, device):
+    """Diagnostic sensors that belong to the sensor platform, not the actor platform."""
+    if device.device_type == "light":
+        entities = [
+            Net4HomeSendStateChangesDiagnosticSensor(entry, device),
+            Net4HomePowerupStatusDiagnosticSensor(entry, device, api),
+            Net4HomeMinHellDiagnosticSensor(entry, device, api),
+        ]
+        if device.model == "Timer":
+            entities.append(Net4HomeTimerTime1DiagnosticSensor(entry, device, api))
+        return entities
+    if device.device_type == "switch":
+        entities = [
+            Net4HomeSendStateChangesDiagnosticSensor(entry, device),
+            Net4HomePowerupStatusDiagnosticSensor(entry, device, api),
+        ]
+        if device.model == "Timer":
+            entities.append(Net4HomeTimerTime1DiagnosticSensor(entry, device, api))
+        return entities
+    if device.device_type == "cover":
+        return [
+            Net4HomeSendStateChangesDiagnosticSensor(entry, device),
+            Net4HomeCoverRunTimeDiagnosticSensor(entry, device, api),
+        ]
+    return []
+
 
 SENSOR_MODEL_TO_TYPE_UNIT = {
     "humidity": ("humidity", PERCENTAGE),
@@ -59,6 +102,9 @@ async def async_setup_entry(hass, entry, async_add_entities: Callable):
     for device in hs_time_devices:
         for sensor_key, unit in HS_TIME_SENSOR_TYPES:
             entities.append(Net4HomeSensor(api, entry, device, sensor_key, unit))
+        entities.append(Net4HomeHsTimeClockSensor(api, entry, device))
+        entities.append(Net4HomeHsTimeMinutesSensor(api, entry, device))
+        entities.append(Net4HomeHsTimeScheduleSensor(api, entry, device))
 
     # Sensor devices (exclude HS-Time, already handled above)
     sensor_devices = [d for d in api.devices.values() if d.device_type == "sensor" and d.model != "HS-Time"]
@@ -86,7 +132,7 @@ async def async_setup_entry(hass, entry, async_add_entities: Callable):
     rf_reader_devices = [d for d in api.devices.values() if d.device_type == "rf_reader" and d.device_id.startswith("MI") and not d.via_device]
     _LOGGER.info(f"[Sensor] Found {len(rf_reader_devices)} RF-Reader devices: {[d.device_id for d in rf_reader_devices]}")
     for device in rf_reader_devices:
-        entities.append(Net4HomeRfReaderSensor(api, entry, device))
+        entities.extend(_rf_reader_sensors(api, entry, device))
 
     # DIAGNOSTIC entities for binary sensors!
     binary_sensor_devices = [d for d in api.devices.values() if d.device_type == "binary_sensor"]
@@ -94,12 +140,59 @@ async def async_setup_entry(hass, entry, async_add_entities: Callable):
     for device in binary_sensor_devices:
         diagnostic_entities.append(Net4HomeInvertedDiagnosticSensor(entry, device))
 
+    for device in api.devices.values():
+        diagnostic_entities.extend(_actor_diagnostic_entities(entry, api, device))
+
+    bell_seen: set[str] = set()
+
+    def _take_bell(device: Net4HomeDevice) -> list:
+        if not is_wav_bell(device) or device.device_id in bell_seen:
+            return []
+        bell_seen.add(device.device_id)
+        return bell_sensors(api, entry, device)
+
+    alarm_seen: set[str] = set()
+
+    def _take_alarm(device: Net4HomeDevice) -> list:
+        if (
+            device.model != "HS-Safety"
+            or device.device_type != "alarm_control_panel"
+            or device.device_id in alarm_seen
+        ):
+            return []
+        alarm_seen.add(device.device_id)
+        return alarm_level_sensors(api, entry, device)
+
+    si_seen: set[str] = set()
+
+    def _take_si(device: Net4HomeDevice) -> list:
+        if (
+            device.model not in SI_MODEL_CHANNELS
+            or not device.device_id.startswith("MI")
+            or device.device_id in si_seen
+        ):
+            return []
+        si_seen.add(device.device_id)
+        return si_power_sensors(api, entry, device)
+
+    for device in api.devices.values():
+        entities.extend(_take_bell(device))
+        entities.extend(_take_alarm(device))
+        entities.extend(_take_si(device))
+
     _LOGGER.info(f"[Sensor] Creating {len(entities)} sensor entities and {len(diagnostic_entities)} diagnostic entities")
+    rf_store = hass.data[DOMAIN].get(store_key(entry.entry_id))
+    if rf_store is not None:
+        entities.append(RfKeyDirectorySensor(entry.entry_id, rf_store))
+
     async_add_entities(entities + diagnostic_entities, True)  
 
     async def async_new_device(device: Net4HomeDevice):
         """Handle new device discovery."""
         _LOGGER.debug(f"async_new_device triggered for: {device.device_id}, model: {device.model}, type: {device.device_type}")
+        fresh = _take_bell(device) + _take_alarm(device) + _take_si(device)
+        if fresh:
+            async_add_entities(fresh)
         if device.device_type == "climate":
             sensors = [
                 Net4HomeSensor(api, entry, device, key, unit)
@@ -112,6 +205,9 @@ async def async_setup_entry(hass, entry, async_add_entities: Callable):
                 Net4HomeSensor(api, entry, device, key, unit)
                 for key, unit in HS_TIME_SENSOR_TYPES
             ]
+            sensors.append(Net4HomeHsTimeClockSensor(api, entry, device))
+            sensors.append(Net4HomeHsTimeMinutesSensor(api, entry, device))
+            sensors.append(Net4HomeHsTimeScheduleSensor(api, entry, device))
             _LOGGER.debug(f"Creating {len(sensors)} HS-Time sensors for {device.device_id}")
             async_add_entities(sensors)
         elif device.device_type == "sensor":
@@ -135,19 +231,39 @@ async def async_setup_entry(hass, entry, async_add_entities: Callable):
             # Only create sensor entities for MI devices, not OBJ child devices
             # IMPORTANT: Devices with via_device are OBJ devices, even if device_id starts with "MI"
             _LOGGER.debug(f"Creating RF-Reader sensor for {device.device_id}")
-            async_add_entities([Net4HomeRfReaderSensor(api, entry, device)])
+            async_add_entities(_rf_reader_sensors(api, entry, device))
         elif device.device_type == "binary_sensor":
             # NEW: also create a diagnostic entity and button for newly detected devices!
             async_add_entities([
                 Net4HomeInvertedDiagnosticSensor(entry, device),
             ])
+        diagnostics = _actor_diagnostic_entities(entry, api, device)
+        if diagnostics:
+            async_add_entities(diagnostics)
+
+    async def async_device_updated(device_id: str = None):
+        if not device_id:
+            return
+        device = api.devices.get(device_id)
+        if not device:
+            return
+        fresh = _take_bell(device) + _take_alarm(device) + _take_si(device)
+        if fresh:
+            async_add_entities(fresh)
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, f"net4home_new_device_{entry.entry_id}", async_new_device)
     )
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, f"net4home_device_updated_{entry.entry_id}", async_device_updated
+        )
+    )
 
 class Net4HomeSensor(SensorEntity):
     """Representation of a net4home sensor."""
+
+    _attr_should_poll = False
     
     def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice, sensor_type: str, unit: str):
         """Initialize the sensor."""
@@ -167,6 +283,8 @@ class Net4HomeSensor(SensorEntity):
             self._attr_device_class = SensorDeviceClass.ILLUMINANCE
         else:
             self._attr_device_class = None
+        if sensor_type in ("temperature", "humidity", "illuminance"):
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         # Initial state from device if already received (e.g. before entity registered)
         if sensor_type == "targettemp" and getattr(device, "targettemp", None) is not None:
             self._state = device.targettemp
@@ -174,6 +292,10 @@ class Net4HomeSensor(SensorEntity):
             self._state = device.presetday
         elif sensor_type == "presetnight" and getattr(device, "presetnight", None) is not None:
             self._state = device.presetnight
+        elif sensor_type in ("temperature", "humidity", "illuminance") and getattr(device, sensor_type, None) is not None:
+            self._state = getattr(device, sensor_type)
+        elif sensor_type in ("broadcast interval", "sunrise", "sunset"):
+            self._state = getattr(device, f"hs_{sensor_type.replace(' ', '_')}", None)
         else:
             self._state = None
         # Avoid duplicating type in name when device name already describes it (e.g. "Humidity Sensor 25406")
@@ -199,6 +321,10 @@ class Net4HomeSensor(SensorEntity):
             return getattr(self.device, "presetday", None)
         if self.sensor_type == "presetnight":
             return getattr(self.device, "presetnight", None)
+        if self.sensor_type in ("temperature", "humidity", "illuminance"):
+            return getattr(self.device, self.sensor_type, None)
+        if self.sensor_type in ("broadcast interval", "sunrise", "sunset"):
+            return getattr(self.device, f"hs_{self.sensor_type.replace(' ', '_')}", None)
         return None
 
     @property
@@ -229,7 +355,14 @@ class Net4HomeSensor(SensorEntity):
             self._attr_name = f"{self.device.name} {translated_name}"
 
         # Sync from device if we have no state yet (e.g. 0xF0 arrived before this entity registered)
-        if self._state is None and self.sensor_type in ("presetday", "presetnight", "targettemp"):
+        if self._state is None and self.sensor_type in (
+            "presetday",
+            "presetnight",
+            "targettemp",
+            "temperature",
+            "humidity",
+            "illuminance",
+        ):
             val = getattr(self.device, self.sensor_type, None)
             if val is not None:
                 self._state = val
@@ -268,8 +401,272 @@ class Net4HomeSensor(SensorEntity):
             async_dispatcher_send(self.hass, signal_key, {self.sensor_type: value})
 
 
+class Net4HomeHsTimeClockSensor(SensorEntity):
+    """Local time reported by an HS-Time module."""
+
+    _attr_should_poll = False
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_has_entity_name = False
+
+    def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice):
+        """Initialize the clock."""
+        self.api = api
+        self.entry = entry
+        self.device = device
+        self._clock = getattr(device, "hs_clock", None)
+        self._attr_unique_id = f"{entry.entry_id}_{slugify(device.device_id)}_hs_clock"
+        self._attr_name = f"{device.name} Uhrzeit"
+        self._attr_icon = "mdi:clock-outline"
+
+    @property
+    def native_value(self):
+        """Return the module time in the Home Assistant timezone."""
+        clock_time = (self._clock or {}).get("time")
+        if not clock_time or self.hass is None:
+            return None
+        timezone = dt_util.get_time_zone(self.hass.config.time_zone)
+        try:
+            return datetime(
+                clock_time["year"],
+                clock_time["month"],
+                clock_time["day"],
+                clock_time["hour"],
+                clock_time["minute"],
+                clock_time["second"],
+                tzinfo=timezone,
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the HS-Time module."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device.device_id.upper())},
+            name=self.device.name,
+            manufacturer="net4home",
+            model=self.device.model,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
+        )
+
+    async def async_added_to_hass(self):
+        """Listen for clock replies."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"net4home_update_{self.device.device_id.upper()}_hs_clock",
+                self._handle_update,
+            )
+        )
+
+    @callback
+    def _handle_update(self, clock: dict):
+        """Store a clock reply."""
+        if isinstance(clock, dict):
+            self._clock = clock
+            self.async_write_ha_state()
+
+
+class Net4HomeHsTimeMinutesSensor(SensorEntity):
+    """Minutes since the last DCF reception."""
+
+    _attr_should_poll = False
+
+    _attr_has_entity_name = False
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_icon = "mdi:timer-outline"
+
+    def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice):
+        """Initialize the reception-gap sensor."""
+        self.api = api
+        self.entry = entry
+        self.device = device
+        clock = getattr(device, "hs_clock", None) or {}
+        self._minutes = clock.get("minutes_without_reception")
+        self._attr_unique_id = f"{entry.entry_id}_{slugify(device.device_id)}_hs_no_reception"
+        self._attr_name = f"{device.name} Minuten ohne Empfang"
+
+    @property
+    def native_value(self):
+        """Return the minute counter from the module."""
+        return self._minutes
+
+    @property
+    def available(self) -> bool:
+        """Stay unavailable until the first clock reply."""
+        return self._minutes is not None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the HS-Time module."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device.device_id.upper())},
+            name=self.device.name,
+            manufacturer="net4home",
+            model=self.device.model,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
+        )
+
+    async def async_added_to_hass(self):
+        """Listen for clock replies."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                f"net4home_update_{self.device.device_id.upper()}_hs_clock",
+                self._handle_update,
+            )
+        )
+
+    @callback
+    def _handle_update(self, clock: dict):
+        """Store the minute counter."""
+        if isinstance(clock, dict) and "minutes_without_reception" in clock:
+            self._minutes = clock["minutes_without_reception"]
+            self.async_write_ha_state()
+
+
+_TARGET_KIND = {
+    "light": "light",
+    "switch": "switch",
+    "cover": "cover",
+    "alarm_control_panel": "alarm",
+}
+
+
+class Net4HomeHsTimeScheduleSensor(SensorEntity):
+    """Switching table of an HS-Time module, one row per used line."""
+
+    _attr_should_poll = False
+
+    _attr_icon = "mdi:table-clock"
+    _attr_has_entity_name = False
+
+    def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice):
+        """Initialize the schedule sensor."""
+        self.api = api
+        self.entry = entry
+        self.device = device
+        self._rows: list = []
+        self._value = None
+        self._attr_unique_id = f"{entry.entry_id}_{slugify(device.device_id)}_hs_schedule"
+        self._attr_name = f"{device.name} Schaltuhr"
+        self._refresh()
+
+    @property
+    def native_value(self):
+        """How many rows the table has, and how many match the current profile."""
+        return self._value
+
+    @property
+    def extra_state_attributes(self):
+        """Rows for a table card, plus the same table as markdown."""
+        return {"rows": self._rows, "markdown": self._markdown()}
+
+    def _markdown(self) -> str:
+        header = "| Nr | Wann | Zeit | Tage | Ziel | Befehl | Profile | Aktiv |"
+        lines = [header, "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+        for row in self._rows:
+            shown = "ja" if row["active"] else ""
+            lines.append(
+                f"| {row['nr']} | {row['mode']} | {row['when']} | {row['weekdays']} "
+                f"| {row['target']} | {row['command']} | {row['profiles']} | {shown} |"
+            )
+        return "\n".join(lines)
+
+    def _targets(self) -> dict:
+        found = {}
+        for item in self.api.devices.values():
+            address = item.objadr
+            if not address:
+                continue
+            kind = _TARGET_KIND.get(item.device_type)
+            current = found.get(address)
+            if current is None or (kind and not current[1]):
+                found[address] = (item.name, kind)
+        return found
+
+    def _refresh(self) -> None:
+        stored = getattr(self.device, "hs_schedule", None)
+        if stored is None:
+            self._rows = []
+            self._value = None
+            return
+        targets = self._targets()
+        mask = getattr(self.device, "hs_profile_mask", None)
+        weekday = None
+        holiday = False
+        if self.hass is not None:
+            weekday = dt_util.now().weekday()
+        clock = getattr(self.device, "hs_clock", None) or {}
+        holiday = bool(clock.get("holiday"))
+        rows = []
+        active_count = 0
+        for row in stored:
+            name, kind = targets.get(row["address"], (None, None))
+            active = schedule_row_active(row, mask, weekday, holiday)
+            if active:
+                active_count += 1
+            when = row["time"]
+            if row["date"]:
+                when = f"{row['date']} {when}".strip()
+            rows.append(
+                {
+                    "nr": row["nr"],
+                    "mode": row["mode"],
+                    "when": when,
+                    "weekdays": row["weekdays"],
+                    "target": name or str(row["address"]),
+                    "address": row["address"],
+                    "command": command_text(row["command"], kind),
+                    "profiles": row["profiles"],
+                    "active": active,
+                }
+            )
+        self._rows = rows
+        if not rows:
+            self._value = "Keine Schaltpunkte"
+        elif mask is None:
+            self._value = f"{len(rows)} Schaltpunkte"
+        else:
+            self._value = f"{len(rows)} Schaltpunkte, {active_count} aktiv"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return the HS-Time module."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device.device_id.upper())},
+            name=self.device.name,
+            manufacturer="net4home",
+            model=self.device.model,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
+        )
+
+    async def async_added_to_hass(self):
+        """Listen for the table, the profile mask and the clock."""
+        mi = self.device.device_id.upper()
+        for suffix in ("hs_schedule", "hs_profile", "hs_clock"):
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self.hass,
+                    f"net4home_update_{mi}_{suffix}",
+                    self._handle_update,
+                )
+            )
+        self._refresh()
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_update(self, _data=None):
+        """Rebuild the table from the device."""
+        self._refresh()
+        self.async_write_ha_state()
+
+
 class Net4HomeRfReaderSensor(SensorEntity):
     """Sensor entity for UP-RF RF-Key reader devices."""
+
+    _attr_should_poll = False
     
     def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice):
         """Initialize the RF reader sensor."""
@@ -335,3 +732,90 @@ class Net4HomeRfReaderSensor(SensorEntity):
         self._last_read = datetime.now().isoformat()
         self.async_write_ha_state()
         _LOGGER.debug(f"RF-Key update for {self.device.device_id}: {self._rf_key} ({self._state})")
+
+
+def _rf_reader_sensors(api, entry, device):
+    """Last presented key plus the ten stored slots of one UP-RF module."""
+    return [Net4HomeRfReaderSensor(api, entry, device)] + [
+        Net4HomeRfKeySlotSensor(api, entry, device, index)
+        for index in range(RF_KEY_COUNT)
+    ]
+
+
+class Net4HomeRfKeySlotSensor(SensorEntity):
+    """One of the ten keys stored in an UP-RF module."""
+
+    _attr_should_poll = False
+
+    def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice, index: int):
+        """Initialize the key slot."""
+        self.api = api
+        self.entry = entry
+        self.device = device
+        self._index = index
+        self._code = None
+        self._master = False
+        self._attr_unique_id = (
+            f"{entry.entry_id}_{slugify(device.device_id)}_rf_key_slot_{index}"
+        )
+        self._attr_icon = "mdi:key"
+        stored = getattr(device, "rf_keys", None)
+        slot = stored[index] if isinstance(stored, list) and len(stored) > index else None
+        self._apply_slot(slot)
+
+    def _apply_slot(self, slot) -> None:
+        """Store the code and mark the master slot in the entity name."""
+        code = ""
+        master = False
+        if isinstance(slot, dict):
+            code = slot.get("code") or ""
+            master = bool(slot.get("master")) and bool(code)
+        self._code = code or None
+        self._master = master
+        label = f"Schlüssel {self._index + 1}"
+        if master:
+            label = f"{label} Master"
+        self._attr_name = f"{self.device.name} {label}"
+        self._attr_icon = "mdi:key-star" if master else "mdi:key"
+
+    @property
+    def native_value(self):
+        """Return the stored key code."""
+        return self._code
+
+    @property
+    def available(self) -> bool:
+        """An empty slot stays on the device without a value."""
+        return self._code is not None
+
+    @property
+    def extra_state_attributes(self):
+        """Expose the slot number and whether this key is the master."""
+        return {"slot": self._index + 1, "master": self._master}
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device information."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device.device_id.upper())},
+            name=self.device.name,
+            manufacturer="net4home",
+            model=self.device.model,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
+        )
+
+    async def async_added_to_hass(self):
+        """Listen for updates of this slot."""
+        self.async_write_ha_state()
+        dispatcher_key = (
+            f"net4home_update_{self.device.device_id.upper()}_rf_slot_{self._index}"
+        )
+        self.async_on_remove(
+            async_dispatcher_connect(self.hass, dispatcher_key, self._handle_update)
+        )
+
+    @callback
+    def _handle_update(self, data: dict):
+        """Apply a slot update from the key list."""
+        self._apply_slot(data)
+        self.async_write_ha_state()

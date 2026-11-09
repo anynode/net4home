@@ -1,17 +1,42 @@
 """Helper functions for net4home device registration and entity creation."""
 import logging
-import glob
-import os
 from typing import Optional, Set, Tuple, List, Dict
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 
 from .const import DOMAIN
 from .models import Net4HomeDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def bus_connected(api) -> bool:
+    """True while the bus connector connection is up."""
+    return bool(getattr(api, "connected", False))
+
+
+def ensure_connected(api) -> None:
+    """Refuse a command instead of dropping it silently."""
+    if not bus_connected(api):
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="not_connected",
+        )
+
+
+def listen_connection(entity) -> None:
+    """Write the entity state when the bus connection goes up or down."""
+
+    @callback
+    def _changed(_connected: bool) -> None:
+        entity.async_write_ha_state()
+
+    entity.async_on_remove(
+        async_dispatcher_connect(entity.hass, entity.api.connection_signal, _changed)
+    )
 
 
 def decode_powerup_status(powerup_index: Optional[int]) -> str:
@@ -179,16 +204,25 @@ async def register_device_in_registry(
         }
         if timer_time1 is not None:
             new_config["timer_time1"] = timer_time1
-        # Compare all fields that might change
+        # Compare all fields that might change. None must not wipe a stored value.
         for key, val in new_config.items():
+            if val is None:
+                continue
             if current.get(key) != val:
                 updated = True
                 current[key] = val  # Update the changed field
 
         if updated:
-            devices = dict(existing_devices)
-            devices[device_id] = current
-            hass.config_entries.async_update_entry(entry, options={"devices": devices})
+            devices = dict(entry.options.get("devices", {}))
+            stored = dict(devices.get(device_id, current))
+            for key, val in new_config.items():
+                if val is None:
+                    continue
+                stored[key] = val
+            devices[device_id] = stored
+            options = dict(entry.options)
+            options["devices"] = devices
+            hass.config_entries.async_update_entry(entry, options=options)
             _LOGGER.info(f"Updated config for device {device_id} in config entry options")
         else:
             _LOGGER.debug(f"Device {device_id} already present and up-to-date in config entry options.")
@@ -236,12 +270,22 @@ async def register_device_in_registry(
                 ng=ng_loaded if ng_loaded is not None else ng,
                 timer_time1=timer_time1_loaded,
             )
+            device.sw_version = sw_version or None
+            device.powerup_status = existing_device.get("powerup_status")
+            device.min_hell = existing_device.get("min_hell")
             api.devices[device_id] = device
             _LOGGER.debug(f"Device {device_id} added to api.devices (already existing)")
         elif api and device_id in api.devices:
             # Update existing device with new module information if available
             device = api.devices[device_id]
+            previous_type = device.device_type
             device.send_state_changes = send_state_changes
+            if device_type and device.device_type != device_type:
+                device.device_type = device_type
+            if model:
+                device.model = model
+            if sw_version:
+                device.sw_version = sw_version
             if timer_time1 is not None:
                 device.timer_time1 = timer_time1
             if module_type is not None:
@@ -254,6 +298,9 @@ async def register_device_in_registry(
                 device.nm = nm
             if ng is not None:
                 device.ng = ng
+            if previous_type == "switch" and device.device_type == "light":
+                remove_actor_switch_entity(hass, entry_id, device)
+                async_dispatcher_send(hass, f"net4home_new_device_{entry_id}", device)
 
         return
 
@@ -292,6 +339,9 @@ async def register_device_in_registry(
         ng=ng,
         timer_time1=timer_time1,
     )
+    device.sw_version = sw_version or None
+    device.powerup_status = existing_device.get("powerup_status")
+    device.min_hell = existing_device.get("min_hell")
 
     if api:
         api.devices[device_id] = device
@@ -334,9 +384,60 @@ async def register_device_in_registry(
         if timer_time1 is not None:
             device_data["timer_time1"] = timer_time1
         devices[device_id] = device_data
-        hass.config_entries.async_update_entry(entry, options={"devices": devices})
+        options = dict(entry.options)
+        options["devices"] = devices
+        hass.config_entries.async_update_entry(entry, options=options)
         _LOGGER.debug(f"Device {device_id} saved to config entry options")
     except Exception as e:
         _LOGGER.error(f"Failed to store device {device_id} in config entry options: {e}")
+
+
+def actor_switch_unique_id(entry_id: str, via_device: str | None, device_id: str) -> str:
+    """Unique id of the switch entity that used to represent this channel."""
+    from homeassistant.util import slugify
+
+    via = (via_device or "unknown").lower()
+    return f"{entry_id}_{slugify(via)}_{slugify(device_id)}"
+
+
+def remove_actor_switch_entity(hass: HomeAssistant, entry_id: str, device) -> None:
+    """Drop the switch entity when a dimmer timer channel becomes a light."""
+    from homeassistant.helpers import entity_registry as er
+
+    unique_id = actor_switch_unique_id(entry_id, device.via_device, device.device_id)
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id("switch", DOMAIN, unique_id)
+    if not entity_id:
+        return
+    registry.async_remove(entity_id)
+    _LOGGER.info("Removed switch %s, the channel is a dimmer light now", entity_id)
+
+
+def migrate_dimmer_timers(hass: HomeAssistant, entry, api) -> None:
+    """Timer channels of a dimmer are lights. Stored switches are converted once."""
+    from .dimmer_layout import is_dimmer_module
+
+    devices = dict(entry.options.get("devices", {}))
+    changed = False
+    for device in list(api.devices.values()):
+        if device.model != "Timer" or device.device_type != "switch":
+            continue
+        parent = api.devices.get((device.via_device or "").upper())
+        if parent is None or not is_dimmer_module(parent.model):
+            continue
+        device.device_type = "light"
+        remove_actor_switch_entity(hass, entry.entry_id, device)
+        stored = devices.get(device.device_id)
+        if stored and stored.get("device_type") != "light":
+            stored = dict(stored)
+            stored["device_type"] = "light"
+            devices[device.device_id] = stored
+            changed = True
+            _LOGGER.info("%s timer channel is a dimmer light", device.device_id)
+    if not changed:
+        return
+    options = dict(entry.options)
+    options["devices"] = devices
+    hass.config_entries.async_update_entry(entry, options=options)
 
 

@@ -6,6 +6,8 @@ from homeassistant.components.diagnostics import async_redact_data
 from .const import DOMAIN
 from .helpers import decode_powerup_status
 
+TO_REDACT = {"host", "password", "title", "unique_id"}
+
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, config_entry: ConfigEntry
@@ -52,7 +54,7 @@ async def async_get_config_entry_diagnostics(
 
     # Connection status
     connection_status = {
-        "connected": api._writer is not None and api._reader is not None,
+        "connected": api.connected,
         "host": api._host,
         "port": api._port,
         "mi": api._mi,
@@ -64,6 +66,7 @@ async def async_get_config_entry_diagnostics(
     config_info = {
         "entry_id": config_entry.entry_id,
         "title": config_entry.title,
+        "unique_id": config_entry.unique_id,
         "version": config_entry.version,
         "domain": config_entry.domain,
         "source": config_entry.source,
@@ -87,5 +90,4 @@ async def async_get_config_entry_diagnostics(
         device_type = device.device_type
         data["statistics"]["devices_by_type"][device_type] = data["statistics"]["devices_by_type"].get(device_type, 0) + 1
 
-    # Redact sensitive info like passwords
-    return async_redact_data(data, ("connection.password",))
+    return async_redact_data(data, TO_REDACT)

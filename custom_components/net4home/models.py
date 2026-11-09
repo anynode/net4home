@@ -52,6 +52,8 @@ class Net4HomeDevice:
         self.presetday: Optional[float] = None
         self.presetnight: Optional[float] = None
         self.targettemp: Optional[float] = None
+        # Module software as reported by D0_ACK_TYP, for example "4.04/1.22".
+        self.sw_version: Optional[str] = None
 
 
 class TN4Hpaket(NamedTuple):

@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.1] - 2026-01-25
 
-- minor updates
+### Added
+- Startup switches for reading group info and module info (config options)
+- `enum_all` service with schema
+- Jalousie position from the actor status (0..100, 0xFF = unknown) and a run-time based estimate
+- `set_position` for covers with a configured run time, position restored after restart
+- Group entities show `groups`, `address` and `members` attributes with translations
+- German, English and Spanish translations for exceptions, abort messages and attributes
+
+### Changed
+- Connection: timeout while connecting, `ConfigEntryNotReady` on failed start, platforms are set up only after a connection
+- Entities become unavailable when the bus connection is lost; commands fail with an error while disconnected
+- Reconnect in rounds with increasing delays
+- `should_poll` is off for all entities, updates are pushed
+- Measurement sensors use `state_class` measurement
+- Config flow: unique id `host:port`, test connection is closed, duplicate entries are aborted
+- First start searches the bus when no modules are stored, then reads module info and groups
+- Setup offers Local when the net4home Server add-on announces service `net4home`, without asking for host, port or password
+- Diagnostics redact host, password, title and unique id
+- Manifest: single `PLATFORMS` list, `issue_tracker` and `loggers` added
+- `api.py` split into protocol, packet dispatch and command modules
+
+### Removed
+- Unused `hub.py`
+
+### Fixed
+- Group entities did not receive member state updates
+- Jalousie shows an unknown state after a stop when the position is unknown
 
 ## [1.3.0] - 2026-01-19
 

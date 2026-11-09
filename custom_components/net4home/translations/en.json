@@ -3,14 +3,25 @@
     "step": {
       "user": {
         "title": "Connect net4home",
-        "description": "Enter the connection details for the net4home bus connector.",
+        "description": "The local net4home server is running. Local needs no address and no password.",
+        "menu_options": {
+          "local": "Local",
+          "remote": "Remote bus connector"
+        }
+      },
+      "local": {
+        "title": "Local",
+        "description": "The local net4home server is used. Address and password are not required."
+      },
+      "remote": {
+        "title": "Remote bus connector",
+        "description": "Enter the connection details for the remote net4home bus connector.",
         "data": {
           "host": "Host",
           "port": "Port (3478)",
           "password": "Password",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "discover": "Enum bus modules",
           "auto_discovery": "Auto-discover unknown devices"
         }
       },
@@ -23,7 +34,6 @@
           "password": "Password",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "discover": "Enum bus modules",
           "auto_discovery": "Auto-discover unknown devices"
         }
       }
@@ -33,14 +43,17 @@
       "timeout": "Timeout while connecting or during handshake.",
       "cannot_connect": "Could not establish connection.",
       "unknown": "Unknown error."
+    },
+    "abort": {
+      "already_configured": "This bus connector is already configured.",
+      "no_local_service": "The local net4home server is not running."
     }
-  }
-  ,
+  },
   "options": {
     "step": {
       "init": {
         "title": "Configure net4home",
-        "description": "Update the connection details for the net4home bus connector.",
+        "description": "Groups and module info are read at startup only while the switches are on. Off skips the long tables. The last read groups stay. Read Device on one device still reads that module.",
         "data": {
           "host": "Host",
           "port": "Port (3478)",
@@ -54,7 +67,9 @@
           "device_module_type": "Device Module Type",
           "device_mi": "Device MI",
           "trigger_enum_all": "Enum bus modules",
-          "auto_discovery": "Auto-discover unknown devices"
+          "auto_discovery": "Auto-discover unknown devices",
+          "read_groups_on_startup": "Read groups on startup",
+          "read_module_info_on_startup": "Read module info on startup"
         }
       }
     },
@@ -74,6 +89,7 @@
   },
   "button": {
     "read_device": "Read Device",
+    "reset_device": "Reset Device",
     "bell_on": "On",
     "bell_off": "Off",
     "bell_vol_up": "Volume Up",
@@ -81,6 +97,10 @@
   },
   "select": {
     "bell_track": "Track"
+  },
+  "number": {
+    "presetday": "Day value",
+    "presetnight": "Night value"
   },
   "device_automation": {
     "trigger_type": {
@@ -91,6 +111,88 @@
     },
     "extra_fields": {
       "rf_key": "Optional: Specific RF-Key code (e.g., 0105F469E9)"
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Cannot connect to bus connector {host}:{port} ({error}). Home Assistant will retry."
+    },
+    "not_connected": {
+      "message": "No connection to the bus connector. The command was not sent."
+    },
+    "entry_not_found": {
+      "message": "No matching net4home entry. Pass entry_id when there is more than one."
+    },
+    "position_unknown": {
+      "message": "The position of {name} is not known yet. Run the cover fully open or fully closed once."
+    }
+  },
+  "entity": {
+    "cover": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Groups"
+          }
+        }
+      },
+      "group": {
+        "state_attributes": {
+          "address": {
+            "name": "Address"
+          },
+          "members": {
+            "name": "Members"
+          }
+        }
+      }
+    },
+    "light": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Groups"
+          }
+        }
+      },
+      "group": {
+        "state_attributes": {
+          "address": {
+            "name": "Address"
+          },
+          "members": {
+            "name": "Members"
+          }
+        }
+      }
+    },
+    "switch": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Groups"
+          }
+        }
+      },
+      "group": {
+        "state_attributes": {
+          "address": {
+            "name": "Address"
+          },
+          "members": {
+            "name": "Members"
+          }
+        }
+      }
+    },
+    "lock": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Groups"
+          }
+        }
+      }
     }
   }
 }

@@ -18,5 +18,143 @@ clear_devices:
       required: false
       selector:
         text:
-        
-        
+enum_all:
+  name: Geräte suchen (ENUM_ALL)
+  description: Sendet ENUM_ALL an den Bus. Alle Module melden sich, neue Module werden angelegt, wenn die automatische Erkennung an ist.
+  fields:
+    entry_id:
+      description: Falls du mehrere net4home-Instanzen hast, gib hier eine spezifische entry_id an.
+      required: false
+      selector:
+        text:
+assign_rf_key:
+  name: RF-Schlüssel einer Person zuordnen
+  description: Speichert Name und Person zu einem UP-RF-Schlüssel. Der Schlüssel bleibt nach einem Neustart erhalten. Bekannte Schlüssel erscheinen im Sensor "RF-Schlüsselverzeichnis".
+  fields:
+    code:
+      name: Schlüsselcode
+      description: Zehnstelliger Hex-Code des Schlüssels, z. B. aus dem Sensor "RF-Schlüsselverzeichnis" oder dem RF-Key-Sensor des Lesers.
+      example: "1A2B3C4D5E"
+      required: true
+      selector:
+        text:
+    person:
+      name: Person
+      description: Person, der der Schlüssel gehört. Leer lassen, um die Zuordnung zu entfernen.
+      required: false
+      selector:
+        entity:
+          domain: person
+    name:
+      name: Name des Schlüssels
+      description: Freier Name, z. B. "Schlüsselanhänger blau". Leer lassen, um den Namen zu entfernen.
+      example: "Schlüssel Oliver"
+      required: false
+      selector:
+        text:
+    entry_id:
+      description: Falls du mehrere net4home-Instanzen hast, gib hier eine spezifische entry_id an.
+      required: false
+      selector:
+        text:
+send_lcd_text:
+  name: Text auf UP-LCD senden
+  description: Zeigt einen freien Text auf einem UP-LCD. Die Parameter entsprechen dem Dialog "Freie Texte" im Konfigurator. Ohne weitere Angaben wird das Display gelöscht und die Beleuchtung eingeschaltet.
+  fields:
+    device_id:
+      name: Modul
+      description: Moduladresse, zum Beispiel MI0219.
+      example: MI0219
+      required: true
+      selector:
+        text:
+    message:
+      name: Text
+      description: Text, höchstens 24 Zeichen. ä, ö, ü und ° werden für das Display umgesetzt.
+      example: Hallo Display
+      required: true
+      selector:
+        text:
+    light:
+      name: Licht
+      description: Beleuchtung einschalten.
+      default: true
+      selector:
+        boolean:
+    light_long:
+      name: Licht lang einschalten
+      description: Beleuchtung länger eingeschaltet lassen.
+      default: false
+      selector:
+        boolean:
+    blink:
+      name: Blinken
+      description: Anzeige blinken lassen.
+      default: false
+      selector:
+        boolean:
+    blink_frequency:
+      name: Blinkfrequenz
+      description: Dieselbe Zahl wie im Konfigurator. 10 ist die Voreinstellung, 1 blinkt einmal pro Sekunde.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: box
+    clear:
+      name: Display vorher löschen
+      description: Anzeige löschen, bevor der Text erscheint.
+      default: true
+      selector:
+        boolean:
+    buzzer:
+      name: Buzzer
+      description: Summer am Display einschalten.
+      default: false
+      selector:
+        boolean:
+    new_line:
+      name: Neue Zeile
+      description: Nach dem Text in die nächste Zeile springen.
+      default: false
+      selector:
+        boolean:
+    x:
+      name: Spalte
+      description: Spalte, 0 bis 15. Nur gesetzt, wenn eine Position angegeben wird.
+      selector:
+        number:
+          min: 0
+          max: 15
+          mode: box
+    y:
+      name: Zeile
+      description: Zeile, 0 bis 15. Nur gesetzt, wenn eine Position angegeben wird.
+      selector:
+        number:
+          min: 0
+          max: 15
+          mode: box
+    entry_id:
+      name: Eintrag
+      description: Nur nötig, wenn mehrere net4home-Einträge vorhanden sind.
+      required: false
+      selector:
+        text:
+remove_rf_key:
+  name: RF-Schlüssel entfernen
+  description: Entfernt einen Schlüssel aus dem RF-Schlüsselverzeichnis. Er wird wieder als unbekannt gezählt, sobald er erneut gelesen wird.
+  fields:
+    code:
+      name: Schlüsselcode
+      description: Zehnstelliger Hex-Code des Schlüssels.
+      example: "1A2B3C4D5E"
+      required: true
+      selector:
+        text:
+    entry_id:
+      description: Falls du mehrere net4home-Instanzen hast, gib hier eine spezifische entry_id an.
+      required: false
+      selector:
+        text:

@@ -3,14 +3,25 @@
     "step": {
       "user": {
         "title": "net4home verbinden",
-        "description": "Gib die Verbindungsdaten zum net4home Busconnector ein.",
+        "description": "Der lokale net4home Server ist gestartet. Lokal braucht keine Adresse und kein Passwort.",
+        "menu_options": {
+          "local": "Lokal",
+          "remote": "Entfernter Busconnector"
+        }
+      },
+      "local": {
+        "title": "Lokal",
+        "description": "Der lokale net4home Server wird verwendet. Adresse und Passwort sind nicht nötig."
+      },
+      "remote": {
+        "title": "Entfernter Busconnector",
+        "description": "Gib die Verbindungsdaten zum entfernten net4home Busconnector ein.",
         "data": {
           "host": "Host",
           "port": "Port (3478)",
           "password": "Passwort",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "discover": "Busmodule ermitteln",
           "auto_discovery": "Unbekannte Geräte automatisch erkennen"
         }
       },
@@ -23,7 +34,6 @@
           "password": "Passwort",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "discover": "Busmodule ermitteln",
           "auto_discovery": "Unbekannte Geräte automatisch erkennen"
         }
       }
@@ -33,14 +43,17 @@
       "timeout": "Timeout beim Verbindungsaufbau oder Handshake.",
       "cannot_connect": "Verbindung konnte nicht hergestellt werden.",
       "unknown": "Unbekannter Fehler."
+    },
+    "abort": {
+      "already_configured": "Dieser Busconnector ist bereits eingerichtet.",
+      "no_local_service": "Der lokale net4home Server ist nicht gestartet."
     }
-  }
-  ,
+  },
   "options": {
     "step": {
       "init": {
         "title": "net4home konfigurieren",
-        "description": "Aktualisiere die Verbindungsdaten zum net4home Busconnector.",
+        "description": "Gruppen und Modulinfo werden beim Start nur gelesen, wenn die Schalter an sind. Aus überspringt die langen Tabellen. Zuletzt gelesene Gruppen bleiben. Lese Modul an einem Gerät liest dieses Modul weiterhin.",
         "data": {
           "host": "Host",
           "port": "Port (3478)",
@@ -54,7 +67,9 @@
           "device_module_type": "Gerätemodultyp",
           "device_mi": "Geräte-MI",
           "trigger_enum_all": "Busmodule ermitteln",
-          "auto_discovery": "Unbekannte Geräte automatisch erkennen"
+          "auto_discovery": "Unbekannte Geräte automatisch erkennen",
+          "read_groups_on_startup": "Beim Neustart Gruppen lesen",
+          "read_module_info_on_startup": "Beim Neustart Modulinfo lesen"
         }
       }
     },
@@ -74,6 +89,7 @@
   },
   "button": {
     "read_device": "Lese Modul",
+    "reset_device": "Reset Modul",
     "bell_on": "EIN",
     "bell_off": "AUS",
     "bell_vol_up": "LAUTER",
@@ -81,6 +97,10 @@
   },
   "select": {
     "bell_track": "Spur"
+  },
+  "number": {
+    "presetday": "Tagwert",
+    "presetnight": "Nachtwert"
   },
   "device_automation": {
     "trigger_type": {
@@ -91,6 +111,88 @@
     },
     "extra_fields": {
       "rf_key": "Optional: Spezifischer RF-Key-Code (z.B. 0105F469E9)"
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "Keine Verbindung zum Busconnector {host}:{port} ({error}). Home Assistant versucht es später erneut."
+    },
+    "not_connected": {
+      "message": "Keine Verbindung zum Busconnector. Der Befehl wurde nicht gesendet."
+    },
+    "entry_not_found": {
+      "message": "Kein passender net4home-Eintrag. Bei mehreren Einträgen entry_id angeben."
+    },
+    "position_unknown": {
+      "message": "Die Position von {name} ist noch unbekannt. Fahre die Jalousie einmal ganz auf oder ganz zu."
+    }
+  },
+  "entity": {
+    "cover": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Gruppen"
+          }
+        }
+      },
+      "group": {
+        "state_attributes": {
+          "address": {
+            "name": "Adresse"
+          },
+          "members": {
+            "name": "Mitglieder"
+          }
+        }
+      }
+    },
+    "light": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Gruppen"
+          }
+        }
+      },
+      "group": {
+        "state_attributes": {
+          "address": {
+            "name": "Adresse"
+          },
+          "members": {
+            "name": "Mitglieder"
+          }
+        }
+      }
+    },
+    "switch": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Gruppen"
+          }
+        }
+      },
+      "group": {
+        "state_attributes": {
+          "address": {
+            "name": "Adresse"
+          },
+          "members": {
+            "name": "Mitglieder"
+          }
+        }
+      }
+    },
+    "lock": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Gruppen"
+          }
+        }
+      }
     }
   }
 }

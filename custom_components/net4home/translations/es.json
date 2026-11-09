@@ -3,14 +3,25 @@
     "step": {
       "user": {
         "title": "Conectar net4home",
-        "description": "Introduce los detalles de conexión para el conector de bus de net4home.",
+        "description": "El servidor local de net4home está en marcha. Local no necesita dirección ni contraseña.",
+        "menu_options": {
+          "local": "Local",
+          "remote": "Conector de bus remoto"
+        }
+      },
+      "local": {
+        "title": "Local",
+        "description": "Se usa el servidor local de net4home. No hacen falta dirección ni contraseña."
+      },
+      "remote": {
+        "title": "Conector de bus remoto",
+        "description": "Introduce los datos de conexión del conector de bus remoto.",
         "data": {
           "host": "Host",
           "port": "Puerto (3478)",
           "password": "Contraseña",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "discover": "Enumerar módulos del bus",
           "auto_discovery": "Detectar automáticamente dispositivos desconocidos"
         }
       },
@@ -23,7 +34,6 @@
           "password": "Contraseña",
           "MI": "MI",
           "OBJADR": "OBJADR",
-          "discover": "Enumerar módulos del bus",
           "auto_discovery": "Detectar automáticamente dispositivos desconocidos"
         }
       }
@@ -33,14 +43,17 @@
       "timeout": "Se agotó el tiempo de conexión o durante el handshake.",
       "cannot_connect": "No se pudo establecer la conexión.",
       "unknown": "Error desconocido."
+    },
+    "abort": {
+      "already_configured": "Este conector de bus ya está configurado.",
+      "no_local_service": "El servidor local de net4home no está en marcha."
     }
-  }
-  ,
+  },
   "options": {
     "step": {
       "init": {
         "title": "Configurar net4home",
-        "description": "Actualiza los detalles de conexión para el conector de bus de net4home.",
+        "description": "Los grupos y la información del módulo se leen al iniciar solo si los interruptores están activados. Desactivado omite las tablas largas. Los grupos leídos se conservan. Leer módulo sigue leyendo ese módulo.",
         "data": {
           "host": "Host",
           "port": "Puerto (3478)",
@@ -54,7 +67,9 @@
           "device_module_type": "Tipo de módulo del dispositivo",
           "device_mi": "MI del dispositivo",
           "trigger_enum_all": "Enumerar módulos del bus",
-          "auto_discovery": "Detectar automáticamente dispositivos desconocidos"
+          "auto_discovery": "Detectar automáticamente dispositivos desconocidos",
+          "read_groups_on_startup": "Leer grupos al iniciar",
+          "read_module_info_on_startup": "Leer información del módulo al iniciar"
         }
       }
     },
@@ -74,6 +89,7 @@
   },
   "button": {
     "read_device": "Leer Dispositivo",
+    "reset_device": "Reiniciar módulo",
     "bell_on": "Encender",
     "bell_off": "Apagar",
     "bell_vol_up": "Subir volumen",
@@ -81,6 +97,10 @@
   },
   "select": {
     "bell_track": "Pista"
+  },
+  "number": {
+    "presetday": "Valor diurno",
+    "presetnight": "Valor nocturno"
   },
   "device_automation": {
     "trigger_type": {
@@ -91,6 +111,88 @@
     },
     "extra_fields": {
       "rf_key": "Opcional: Código de Clave RF específico (ej., 0105F469E9)"
+    }
+  },
+  "exceptions": {
+    "cannot_connect": {
+      "message": "No se puede conectar con el conector de bus {host}:{port} ({error}). Home Assistant lo reintentará."
+    },
+    "not_connected": {
+      "message": "Sin conexión con el conector de bus. La orden no se envió."
+    },
+    "entry_not_found": {
+      "message": "No hay una entrada net4home adecuada. Indica entry_id si hay varias."
+    },
+    "position_unknown": {
+      "message": "La posición de {name} aún no se conoce. Abre o cierra la persiana por completo una vez."
+    }
+  },
+  "entity": {
+    "cover": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Grupos"
+          }
+        }
+      },
+      "group": {
+        "state_attributes": {
+          "address": {
+            "name": "Dirección"
+          },
+          "members": {
+            "name": "Miembros"
+          }
+        }
+      }
+    },
+    "light": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Grupos"
+          }
+        }
+      },
+      "group": {
+        "state_attributes": {
+          "address": {
+            "name": "Dirección"
+          },
+          "members": {
+            "name": "Miembros"
+          }
+        }
+      }
+    },
+    "switch": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Grupos"
+          }
+        }
+      },
+      "group": {
+        "state_attributes": {
+          "address": {
+            "name": "Dirección"
+          },
+          "members": {
+            "name": "Miembros"
+          }
+        }
+      }
+    },
+    "lock": {
+      "channel": {
+        "state_attributes": {
+          "groups": {
+            "name": "Grupos"
+          }
+        }
+      }
     }
   }
 }

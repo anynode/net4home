@@ -3,14 +3,21 @@
 from homeassistant.const import Platform
 
 PLATFORMS = [
+    Platform.LIGHT,
+    Platform.SWITCH,
+    Platform.COVER,
     Platform.BINARY_SENSOR,
     Platform.CLIMATE,
-    Platform.COVER,
-    Platform.LIGHT,
-    Platform.SCENE,
     Platform.SENSOR,
-    Platform.SWITCH,
+    Platform.BUTTON,
+    Platform.SELECT,
+    Platform.ALARM_CONTROL_PANEL,
+    Platform.EVENT,
+    Platform.NUMBER,
+    Platform.LOCK,
 ]
+
+CONNECT_TIMEOUT = 10
 
 # Domain and network defaults
 DOMAIN = "net4home"
@@ -19,6 +26,8 @@ DEFAULT_OBJADR = 32700
 CONF_MI = "MI"
 CONF_OBJADR = "OBJADR"
 CONF_AUTO_DISCOVERY = "auto_discovery"
+CONF_READ_GROUPS_ON_STARTUP = "read_groups_on_startup"
+CONF_READ_MODULE_INFO_ON_STARTUP = "read_module_info_on_startup"
 
 N4H_IP_PORT                         = 3478
 N4H_BJ_NAME_BUSCONNECTOR  =  "_n4hbuscon._tcp"
@@ -145,11 +154,15 @@ D0_VALUE_REQ = 102
 D0_STATUS_INFO = 105
 D0_MODUL_BUSY = 35
 D0_RD_ACTOR_DATA = 26
+D0_RESET_MODUL = 27
 D0_RD_ACTOR_DATA_ACK = 31
 
 D0_WR_SENSOR_DATA = 14
 D0_RD_SENSOR_DATA = 15
 D0_RD_SENSOR_DATA_ACK = 16
+
+D0_RD_GRP_DATA = 19
+D0_RD_GRP_DATA_ACK = 20
 
 D0_GET_NAME_REQ = 33
 D0_GET_NAME_ACK = 34

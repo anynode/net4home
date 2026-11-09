@@ -9,9 +9,9 @@ from homeassistant.util import slugify
 from homeassistant import config_entries
 from typing import Callable
 
-from .diagnostic_sensor import Net4HomeSendStateChangesDiagnosticSensor, Net4HomePowerupStatusDiagnosticSensor, Net4HomeMinHellDiagnosticSensor
 from .const import DOMAIN
-from .helpers import parent_device_link
+from .group_entity import ATTR_GROUPS, Net4HomeGroupLight, group_labels, listen_group_attribute, take_new_groups
+from .helpers import bus_connected, ensure_connected, listen_connection, parent_device_link
 from .api import Net4HomeApi, Net4HomeDevice
 
 import logging
@@ -35,33 +35,13 @@ async def async_setup_entry(
         for device in light_devices
     ]
 
-    diagnostic_entities = [
-        Net4HomeSendStateChangesDiagnosticSensor(entry, device)
-        for device in light_devices
-    ]
-    
-    powerup_diagnostic_entities = [
-        Net4HomePowerupStatusDiagnosticSensor(entry, device, api)
-        for device in light_devices
-    ]
-    
-    min_hell_diagnostic_entities = [
-        Net4HomeMinHellDiagnosticSensor(entry, device, api)
-        for device in light_devices
-    ]
-
-    _LOGGER.info(f"[Light] Creating {len(entities)} light entities and {len(diagnostic_entities) + len(powerup_diagnostic_entities) + len(min_hell_diagnostic_entities)} diagnostic entities")
-    async_add_entities(entities + diagnostic_entities + powerup_diagnostic_entities + min_hell_diagnostic_entities, True)
+    _LOGGER.info(f"[Light] Creating {len(entities)} light entities")
+    async_add_entities(entities, True)
 
     async def async_new_device(device: Net4HomeDevice):
         if device.device_type != "light":
             return
-        async_add_entities([
-            Net4HomeLight(api, entry, device),
-            Net4HomeSendStateChangesDiagnosticSensor(entry, device),
-            Net4HomePowerupStatusDiagnosticSensor(entry, device, api),
-            Net4HomeMinHellDiagnosticSensor(entry, device, api)
-        ])
+        async_add_entities([Net4HomeLight(api, entry, device)])
 
     entry.async_on_unload(
         async_dispatcher_connect(
@@ -69,11 +49,31 @@ async def async_setup_entry(
         )
     )
 
+    seen_groups: set[int] = set()
+
+    async def async_new_groups(groups):
+        fresh = take_new_groups(
+            "light",
+            seen_groups,
+            groups,
+            lambda group: Net4HomeGroupLight(api, entry, group),
+        )
+        if fresh:
+            async_add_entities(fresh)
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, f"net4home_groups_{entry.entry_id}", async_new_groups
+        )
+    )
+
 
 class Net4HomeLight(LightEntity):
     """Representation of a net4home light."""
-    
+
     _attr_has_entity_name = False
+    _attr_should_poll = False
+    _attr_translation_key = "channel"
     _supported_color_modes = frozenset({ColorMode.BRIGHTNESS})
     
     def __init__(self, api: Net4HomeApi, entry, device: Net4HomeDevice):
@@ -92,6 +92,10 @@ class Net4HomeLight(LightEntity):
         """Return a unique ID for the entity."""
         via = (self.device.via_device or "unknown").lower()
         return f"{self.entry.entry_id}_{slugify(via)}_{slugify(self.device.device_id)}"
+
+    @property
+    def available(self) -> bool:
+        return bus_connected(self.api)
 
     @property
     def is_on(self) -> bool:
@@ -132,7 +136,8 @@ class Net4HomeLight(LightEntity):
             "device_id": self.device.device_id,
             "model": self.device.model,
             "via_device": self.device.via_device or "",
-            "send_state_changes": self.send_state_changes,  
+            "send_state_changes": bool(getattr(self.device, "send_state_changes", False)),
+            ATTR_GROUPS: group_labels(self),
         }
 
 
@@ -146,6 +151,8 @@ class Net4HomeLight(LightEntity):
                 self._handle_update,
             )
         )
+        listen_group_attribute(self)
+        listen_connection(self)
 
     @callback
     def _handle_update(self, update_data):
@@ -161,6 +168,7 @@ class Net4HomeLight(LightEntity):
     async def async_turn_off(self, **kwargs):
         """Turn the light off."""
         _LOGGER.debug(f"Turning light OFF: {self.device.device_id}")
+        ensure_connected(self.api)
         self._is_on = False
         await self.api.async_turn_off_light(self.device.device_id)
         self.async_write_ha_state()
@@ -168,8 +176,15 @@ class Net4HomeLight(LightEntity):
 
     async def async_turn_on(self, **kwargs):
         """Turn the light on."""
+        ensure_connected(self.api)
+        if self.device.model == "Timer" and kwargs.get("brightness") is None:
+            _LOGGER.debug("Recalling last dimmer level: %s", self.device.device_id)
+            await self.api.async_turn_on_light(self.device.device_id, None)
+            self._is_on = True
+            self.async_write_ha_state()
+            return
+
         brightness = kwargs.get("brightness", 255)
-        
         if brightness is None:
             brightness = 255
 

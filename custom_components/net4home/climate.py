@@ -11,10 +11,30 @@ from homeassistant.util import slugify
 from homeassistant.core import callback
 
 from .const import DOMAIN
-from .helpers import parent_device_link
+from .helpers import bus_connected, listen_connection, parent_device_link
 from .api import Net4HomeApi, Net4HomeDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+_HVAC_MODES = {
+    "heat": HVACMode.HEAT,
+    "cool": HVACMode.COOL,
+    "heat_cool": HVACMode.HEAT_COOL,
+    "off": HVACMode.OFF,
+}
+
+
+def _hvac_mode_from_regulators(heat_active, cool_active):
+    """Climate mode from the two controller flags. Unknown until both are known."""
+    if heat_active is None or cool_active is None:
+        return None
+    if heat_active and cool_active:
+        return HVACMode.HEAT_COOL
+    if heat_active:
+        return HVACMode.HEAT
+    if cool_active:
+        return HVACMode.COOL
+    return HVACMode.OFF
 
 
 async def async_setup_entry(hass, entry, async_add_entities: Callable):
@@ -47,8 +67,14 @@ async def async_setup_entry(hass, entry, async_add_entities: Callable):
 
 class Net4HomeClimate(ClimateEntity):
     """Representation of a net4home climate device."""
+
+    _attr_should_poll = False
+
+    @property
+    def available(self) -> bool:
+        return bus_connected(self.api)
     
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.COOL, HVACMode.HEAT_COOL, HVACMode.OFF]
     _attr_min_temp = 5.0
@@ -63,11 +89,11 @@ class Net4HomeClimate(ClimateEntity):
 
         self._attr_name = device.name
         self._attr_unique_id = f"{entry.entry_id}_{slugify(device.via_device or 'unknown')}_{slugify(device.device_id)}"
-        self._attr_hvac_mode = HVACMode.HEAT
-        self._attr_target_temperature = (
-            device.targettemp if getattr(device, "targettemp", None) is not None else 21.0
-        )
-        self._attr_current_temperature = 21.0
+        self._heat_active = getattr(device, "heat_active", None)
+        self._cool_active = getattr(device, "cool_active", None)
+        self._attr_hvac_mode = _hvac_mode_from_regulators(self._heat_active, self._cool_active)
+        self._attr_native_target_temperature = getattr(device, "targettemp", None)
+        self._attr_native_current_temperature = None
         self._attr_presetday_temperature = (
             device.presetday if getattr(device, "presetday", None) is not None else 20.0
         )
@@ -88,6 +114,7 @@ class Net4HomeClimate(ClimateEntity):
 
     async def async_added_to_hass(self):
         """Register update listener when entity is added."""
+        listen_connection(self)
         # General updates for climate device
         self.async_on_remove(
             async_dispatcher_connect(
@@ -111,32 +138,40 @@ class Net4HomeClimate(ClimateEntity):
     @callback
     def _handle_temperature_update(self, value: float):
         """Handle temperature update from sensor."""
-        self._attr_current_temperature = value
+        self._attr_native_current_temperature = value
         self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self):
+        """Heating and cooling controller, as two independent flags."""
+        return {
+            "heat_active": self._heat_active,
+            "cool_active": self._cool_active,
+        }
 
     @callback
     def _handle_update(self, data: dict):
         """Handle incoming update from API."""
+        if "heat_active" in data:
+            self._heat_active = data["heat_active"]
+        if "cool_active" in data:
+            self._cool_active = data["cool_active"]
         # Update HVAC Mode only when explicitly in payload (e.g. D0_ACTOR_ACK / D0_SET_N), not on targettemp-only updates (D0_SET)
         hvac_mode_str = data.get("hvac_mode")
         if hvac_mode_str is not None:
-            if hvac_mode_str == "heat":
-                self._attr_hvac_mode = HVACMode.HEAT
-            elif hvac_mode_str == "cool":
-                self._attr_hvac_mode = HVACMode.COOL
-            elif hvac_mode_str == "heat_cool":
-                self._attr_hvac_mode = HVACMode.HEAT_COOL
-            elif hvac_mode_str == "off":
-                self._attr_hvac_mode = HVACMode.OFF
+            self._attr_hvac_mode = _HVAC_MODES.get(hvac_mode_str, self._attr_hvac_mode)
         elif "is_on" in data:
             # Fallback: Use is_on only when explicitly present (for compatibility)
             self._attr_hvac_mode = HVACMode.HEAT if data.get("is_on", True) else HVACMode.OFF
         # else: do not change _attr_hvac_mode (e.g. D0_SET only sends targettemp)
         
-        self._attr_target_temperature = data.get("targettemp") if "targettemp" in data else (
-            self.device.targettemp if getattr(self.device, "targettemp", None) is not None else self._attr_target_temperature
+        if "targettemp" in data:
+            self._attr_native_target_temperature = data["targettemp"]
+        elif getattr(self.device, "targettemp", None) is not None:
+            self._attr_native_target_temperature = self.device.targettemp
+        self._attr_native_current_temperature = data.get(
+            "current_temp", self._attr_native_current_temperature
         )
-        self._attr_current_temperature = data.get("current_temp", self._attr_current_temperature)
         self._attr_presetday_temperature = data.get("presetday") if "presetday" in data else (
             self.device.presetday if getattr(self.device, "presetday", None) is not None else self._attr_presetday_temperature
         )
@@ -148,6 +183,8 @@ class Net4HomeClimate(ClimateEntity):
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:
         """Set HVAC mode (heat, cool, heat_cool, off)."""
         self._attr_hvac_mode = hvac_mode
+        self._heat_active = hvac_mode in (HVACMode.HEAT, HVACMode.HEAT_COOL)
+        self._cool_active = hvac_mode in (HVACMode.COOL, HVACMode.HEAT_COOL)
         await self.api.async_set_climate_mode(self.device.device_id, hvac_mode)
         self.async_write_ha_state()
 
@@ -155,6 +192,6 @@ class Net4HomeClimate(ClimateEntity):
         """Set the target temperature."""
         temp = kwargs.get("temperature")
         if temp is not None:
-            self._attr_target_temperature = temp
+            self._attr_native_target_temperature = temp
             await self.api.async_set_temperature(self.device.device_id, temp)
             self.async_write_ha_state()

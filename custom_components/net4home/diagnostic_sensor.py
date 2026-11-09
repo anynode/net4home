@@ -15,6 +15,8 @@ _LOGGER = logging.getLogger(__name__)
 # Diagnostic for inverted flag (binary_sensor)
 class Net4HomeInvertedDiagnosticSensor(SensorEntity):
     """Diagnostic sensor for inverted flag."""
+
+    _attr_should_poll = False
     
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:swap-vertical"
@@ -47,6 +49,8 @@ class Net4HomeInvertedDiagnosticSensor(SensorEntity):
 # Diagnostic for send_state_changes
 class Net4HomeSendStateChangesDiagnosticSensor(SensorEntity):
     """Diagnostic sensor for send_state_changes flag."""
+
+    _attr_should_poll = False
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:sync-alert"
@@ -108,9 +112,21 @@ class Net4HomeSendStateChangesDiagnosticSensor(SensorEntity):
             **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
         )
 
+def _actor_setting(sensor, key):
+    """Current value on the device, or the copy stored in the config entry."""
+    device = sensor.api.devices.get(sensor.device.device_id, sensor.device)
+    value = getattr(device, key, None)
+    if value is not None:
+        return value
+    stored = sensor.entry.options.get("devices", {}).get(sensor.device.device_id, {})
+    return stored.get(key)
+
+
 # Diagnostic for powerup_status
 class Net4HomePowerupStatusDiagnosticSensor(SensorEntity):
     """Diagnostic sensor for powerup status."""
+
+    _attr_should_poll = False
     
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:power-cycle"
@@ -126,7 +142,7 @@ class Net4HomePowerupStatusDiagnosticSensor(SensorEntity):
     @property
     def native_value(self):
         """Return the powerup status value."""
-        powerup_status = getattr(self.device, "powerup_status", None)
+        powerup_status = _actor_setting(self, "powerup_status")
         if powerup_status is None:
             return "Not yet read"
         return decode_powerup_status(powerup_status)
@@ -160,6 +176,8 @@ class Net4HomePowerupStatusDiagnosticSensor(SensorEntity):
 # Diagnostic for timer_time1 (only for timer actors)
 class Net4HomeTimerTime1DiagnosticSensor(SensorEntity):
     """Diagnostic sensor for timer time1."""
+
+    _attr_should_poll = False
     
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:timer-outline"
@@ -208,6 +226,8 @@ class Net4HomeTimerTime1DiagnosticSensor(SensorEntity):
 # Diagnostic for min_hell (only for dimmers)
 class Net4HomeMinHellDiagnosticSensor(SensorEntity):
     """Diagnostic sensor for minimum brightness."""
+
+    _attr_should_poll = False
     
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:brightness-4"
@@ -223,7 +243,7 @@ class Net4HomeMinHellDiagnosticSensor(SensorEntity):
     @property
     def native_value(self):
         """Return the minimum brightness value."""
-        min_hell = getattr(self.device, "min_hell", None)
+        min_hell = _actor_setting(self, "min_hell")
         if min_hell is None:
             return "Not yet read"
         return f"{min_hell}%"
@@ -257,6 +277,8 @@ class Net4HomeMinHellDiagnosticSensor(SensorEntity):
 # Diagnostic for timer_time1 for covers (Run time)
 class Net4HomeCoverRunTimeDiagnosticSensor(SensorEntity):
     """Diagnostic sensor for cover run time."""
+
+    _attr_should_poll = False
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION

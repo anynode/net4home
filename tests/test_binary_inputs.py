@@ -27,8 +27,15 @@ class BinaryInputModuleTest(unittest.TestCase):
         self.assertTrue(binary_inputs.is_binary_input_module("UP-S4"))
 
     def test_other_multi_input_modules_use_the_same_set(self) -> None:
-        for model in ("UP-S8", "UP-S4+", "UP-GL", "S32A32"):
+        for model in ("UP-S8", "UP-S4+", "UP-GL", "S32A32", "UP-PIR2-Connect"):
             self.assertIn(model, binary_inputs.BINARY_INPUT_MODELS)
+
+    def test_contact_pin_on_another_module_is_a_binary_channel(self) -> None:
+        self.assertTrue(binary_inputs.is_binary_sensor_channel("HS-Safety", 1))
+        self.assertTrue(binary_inputs.is_binary_sensor_channel("EXT-Vi4", 13))
+        self.assertFalse(binary_inputs.is_binary_sensor_channel("UP-TLH", 1))
+        self.assertFalse(binary_inputs.is_binary_sensor_channel("HS-AD3", 9))
+        self.assertTrue(binary_inputs.is_binary_sensor_channel("UP-S4", 0))
 
     def test_other_module_kinds_stay_out(self) -> None:
         for model in ("UP-TLH", "UP-RF", "HS-Time", "HS-AD3", None, ""):

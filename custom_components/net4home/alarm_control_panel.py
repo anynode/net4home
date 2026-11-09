@@ -3,33 +3,39 @@ from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntity,
     AlarmControlPanelEntityFeature,
     AlarmControlPanelState,
-    CodeFormat,
 )
-from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant import config_entries
 from typing import Callable
 
+from .alarm_layout import (
+    ALARM_SET_AWAY,
+    ALARM_SET_DISARM,
+    ALARM_SET_HOME,
+    ALARM_SET_NIGHT,
+    STATE_ARMED_AWAY,
+    STATE_ARMED_HOME,
+    STATE_ARMED_NIGHT,
+    STATE_ARMING,
+    STATE_DISARMED,
+)
 from .const import DOMAIN
-from .helpers import parent_device_link
+from .helpers import bus_connected, listen_connection, parent_device_link
 from .api import Net4HomeApi, Net4HomeDevice
 
 import logging
 
 _LOGGER = logging.getLogger(__name__)
 
-# Alarm states mapping
-# According to docs: 
-# 0 = Unscharf (DISARMED)
-# 1 = Extern Scharf (ARMED_AWAY)
-# 2 = Intern 2 Scharf (ARMED_NIGHT)
-# 3 = Intern 1 Scharf (ARMED_HOME)
-ALARM_MODE_UNSCHARF = 0  # Unscharf
-ALARM_MODE_EXTERN = 1  # Extern Scharf
-ALARM_MODE_INTERN2 = 2  # Intern 2 Scharf
-ALARM_MODE_INTERN1 = 3  # Intern 1 Scharf
+_HA_STATES = {
+    STATE_DISARMED: AlarmControlPanelState.DISARMED,
+    STATE_ARMED_HOME: AlarmControlPanelState.ARMED_HOME,
+    STATE_ARMED_NIGHT: AlarmControlPanelState.ARMED_NIGHT,
+    STATE_ARMED_AWAY: AlarmControlPanelState.ARMED_AWAY,
+    STATE_ARMING: AlarmControlPanelState.ARMING,
+}
 
 
 async def async_setup_entry(
@@ -40,7 +46,7 @@ async def async_setup_entry(
     """Set up net4home alarm control panel entities."""
     try:
         api: Net4HomeApi = hass.data[DOMAIN][entry.entry_id]
-        
+
         _LOGGER.info(f"[Alarm] Setup called with {len(api.devices)} devices in API")
         _LOGGER.debug(f"[Alarm] All devices: {[(d.device_id, d.device_type, d.model) for d in api.devices.values()]}")
         alarm_devices = [d for d in api.devices.values() if d.device_type == "alarm_control_panel"]
@@ -48,7 +54,7 @@ async def async_setup_entry(
     except Exception as e:
         _LOGGER.error(f"[Alarm] Error during setup: {e}", exc_info=True)
         return
-    
+
     try:
         entities = [
             Net4HomeAlarmControlPanel(api, entry, device)
@@ -78,12 +84,20 @@ async def async_setup_entry(
 class Net4HomeAlarmControlPanel(AlarmControlPanelEntity):
     """Representation of a net4home HS-Safety alarm control panel."""
 
+    _attr_should_poll = False
+
+    @property
+    def available(self) -> bool:
+        return bus_connected(self.api)
+
     _attr_supported_features = (
         AlarmControlPanelEntityFeature.ARM_AWAY
         | AlarmControlPanelEntityFeature.ARM_HOME
         | AlarmControlPanelEntityFeature.ARM_NIGHT
     )
-    _attr_code_format = CodeFormat.NUMBER
+    # The module has no PIN. The arm commands go out with the contact check
+    # (11/12/13); the module itself refuses while a contact is open.
+    _attr_code_arm_required = False
 
     def __init__(self, api: Net4HomeApi, entry: config_entries.ConfigEntry, device: Net4HomeDevice):
         """Initialize the alarm control panel."""
@@ -92,8 +106,8 @@ class Net4HomeAlarmControlPanel(AlarmControlPanelEntity):
         self.device = device
         self._attr_name = device.name
         self._attr_unique_id = f"{entry.entry_id}_{device.device_id}"
-        self._attr_alarm_state = AlarmControlPanelState.DISARMED
-        self._current_mode = None  # Stores the current alarm mode (0-3)
+        stored = getattr(device, "alarm_state", None)
+        self._attr_alarm_state = _HA_STATES.get(stored)
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -108,6 +122,7 @@ class Net4HomeAlarmControlPanel(AlarmControlPanelEntity):
 
     async def async_added_to_hass(self) -> None:
         """Register update listener when entity is added."""
+        listen_connection(self)
         await super().async_added_to_hass()
         self.async_on_remove(
             async_dispatcher_connect(
@@ -119,39 +134,31 @@ class Net4HomeAlarmControlPanel(AlarmControlPanelEntity):
 
     @callback
     def _handle_update(self, data=None):
-        """Handle update signal from dispatcher."""
-        # TODO: Update state based on received data
-        # For now, we just write the state
+        """Apply a status reply from the alarm module."""
+        if not isinstance(data, dict):
+            return
+        state = _HA_STATES.get(data.get("alarm_state"))
+        if state is None:
+            return
+        self._attr_alarm_state = state
         self.async_write_ha_state()
 
     async def async_alarm_disarm(self, code: str | None = None) -> None:
         """Send disarm command."""
         _LOGGER.debug(f"Disarming alarm {self.device.device_id}")
-        await self.api.async_set_alarm_state(self.device.device_id, ALARM_MODE_UNSCHARF)
-        self._current_mode = ALARM_MODE_UNSCHARF
-        self._attr_alarm_state = AlarmControlPanelState.DISARMED
-        self.async_write_ha_state()
+        await self.api.async_set_alarm_state(self.device.device_id, ALARM_SET_DISARM)
 
     async def async_alarm_arm_home(self, code: str | None = None) -> None:
-        """Send arm home command (Intern 1 Scharf)."""
+        """Arm Intern 1 after the module checks that every contact is closed."""
         _LOGGER.debug(f"Arming home alarm {self.device.device_id}")
-        await self.api.async_set_alarm_state(self.device.device_id, ALARM_MODE_INTERN1)
-        self._current_mode = ALARM_MODE_INTERN1
-        self._attr_alarm_state = AlarmControlPanelState.ARMED_HOME
-        self.async_write_ha_state()
+        await self.api.async_set_alarm_state(self.device.device_id, ALARM_SET_HOME)
 
     async def async_alarm_arm_away(self, code: str | None = None) -> None:
-        """Send arm away command (Extern Scharf)."""
+        """Arm Extern after the module checks that every contact is closed."""
         _LOGGER.debug(f"Arming away alarm {self.device.device_id}")
-        await self.api.async_set_alarm_state(self.device.device_id, ALARM_MODE_EXTERN)
-        self._current_mode = ALARM_MODE_EXTERN
-        self._attr_alarm_state = AlarmControlPanelState.ARMED_AWAY
-        self.async_write_ha_state()
+        await self.api.async_set_alarm_state(self.device.device_id, ALARM_SET_AWAY)
 
     async def async_alarm_arm_night(self, code: str | None = None) -> None:
-        """Send arm night command (Intern 2 Scharf)."""
+        """Arm Intern 2 after the module checks that every contact is closed."""
         _LOGGER.debug(f"Arming night alarm {self.device.device_id}")
-        await self.api.async_set_alarm_state(self.device.device_id, ALARM_MODE_INTERN2)
-        self._current_mode = ALARM_MODE_INTERN2
-        self._attr_alarm_state = AlarmControlPanelState.ARMED_NIGHT
-        self.async_write_ha_state()
+        await self.api.async_set_alarm_state(self.device.device_id, ALARM_SET_NIGHT)

@@ -14,12 +14,9 @@ Die `net4home`-Integration ermöglicht Verbindungen zu mehr als einem Bus-Connec
 
 ## Funktionen
 
-- Auto-Erkennung über Zeroconf
 - Manuelle Konfiguration (Host, Port, Bus-Passwort, MI, OBJADR)
 - Binäre Sensoren (Kontakt, Bewegung, etc.)
 - Lokalisierungsunterstützung in Englisch, Deutsch und Spanisch
-- Module über den Options-Flow hinzufügen (Modultyp, Software-Version, EE-Text und MI)
-- Geräte über den Options-Flow hinzufügen (MI und Modultyp)
 - **Diagnose-Sensoren** für Gerätekonfiguration:
   - **PowerUp-Status** für Schalter und Lampen (Dimmer) - zeigt das Einschaltverhalten nach Stromausfall
   - **Minimale Helligkeit** für Dimmer - zeigt die konfigurierte minimale Helligkeit in Prozent
@@ -54,7 +51,7 @@ Wenn Sie die Installation manuell bevorzugen, folgen Sie diesen Schritten:
 
 ## Konfiguration
 
-Der net4home Bus-Connector kann von Home Assistant automatisch erkannt werden. Wenn eine Instanz gefunden wurde, wird sie als "Gefunden" angezeigt. Sie können sie dann direkt einrichten.
+Der Bus-Connector wird mit Host, Port und Passwort eingetragen. Läuft das Add-on **net4home Server**, bietet die Einrichtung stattdessen **Lokal** an. Dabei werden Adresse, Port und Passwort nicht abgefragt. Das Add-on meldet den Dienst unter dem Namen `net4home`.
 
 ### Ersteinrichtung
 
@@ -62,9 +59,11 @@ Während der Ersteinrichtung können Sie konfigurieren:
 - **Host**: IP-Adresse oder Hostname des Bus-Connectors
 - **Port**: TCP-Port (Standard: 3478)
 - **Passwort**: Bus-Passwort
-- **MI**: Modul-ID (Standard: 1)
-- **OBJADR**: Objektadresse (Standard: 1)
-- **Erkennen**: Option zum Auslösen von ENUM_ALL während des Setups
+- **MI**: Modul-ID der Integration auf dem Bus (Standard: 65281)
+- **OBJADR**: Objektadresse der Integration (Standard: 32700)
+- **Unbekannte Geräte automatisch erkennen**: ein Modul anlegen, sobald es von sich aus sendet
+
+Sind noch keine Module gespeichert, sucht der erste Start den Bus von selbst. Danach liest er die Modulinfo und die Gruppen. Ein zweiter Start ist dafür nicht nötig.
 
 ### Optionen
 
@@ -72,18 +71,25 @@ Nachdem die Integration eingerichtet wurde, können Sie die Optionen über folge
 Einstellungen → Geräte & Dienste → net4home → Konfigurieren
 
 In den Optionen können Sie:
-- **MI aktualisieren**: Modul-ID ändern ohne Neu-Konfiguration
-- **OBJADR aktualisieren**: Objektadresse ändern ohne Neu-Konfiguration
-- **ENUM_ALL auslösen**: Geräteerkennung manuell auslösen
+- **MI** und **OBJADR** ändern
+- **Busmodule ermitteln**: die Suche auf dem Bus anstoßen
+- **Unbekannte Geräte automatisch erkennen**
+- **Beim Neustart Gruppen lesen** und **Beim Neustart Modulinfo lesen**: die langen Tabellen beim Start auslassen. Was gelesen wird und was ausbleibt, beschreibt die [Anleitung Lesen beim Start](docs/lesen.md).
+
+Was nach einer Änderung im Konfigurator oder in den Optionen zu tun ist, beschreibt die [Anleitung Konfiguration ändern](docs/konfiguration-aendern.md).
 
 ## Unterstützte Gerätetypen
 
+- **Alarm**: HS-Safety. Scharfschaltung, Kontakte und Sabotage beschreibt die [Anleitung HS-Safety](docs/hs-safety.md).
 - **Binary_sensor**: Kontaktsensoren, Bewegungsmelder und andere binäre Eingänge
-- **Climate**: Thermostat und Heizungssteuerung (UP-TLH)
+- **Climate**: Thermostat und Heizungssteuerung (UP-TLH). Sollwert, Tagwert, Nachtwert und die beiden Regler beschreibt die [Anleitung UP-TLH](docs/up-tlh.md).
+- **HS-Time**: Uhr, acht Profile und die Schalttabelle. Beschreibt die [Anleitung HS-Time](docs/hs-time.md).
 - **Cover**: Jalousien- und Rollladensteuerung (HS-AJ3, HS-AJ4-500, etc.)
 - **Light**: Dimmer-Steuerungen mit Helligkeitsunterstützung (HS-AD3, HS-AD3e, HS-AD1-1x10V)
 - **Sensor**: Temperatur-, Feuchtigkeits- und Beleuchtungsstärke-Sensoren
 - **Switch**: Relais-Schalter und Timer-Aktoren (HS-AR6, UP-AR2, etc.)
+- **UP-RF**: Schlüsselverzeichnis mit Zuordnung zu Personen und ein Zutrittsereignis je Leser. Die Einrichtung beschreibt die [Anleitung UP-RF-Schlüssel](docs/rf-schluessel.md).
+- **Gruppen**: eine Entität je Schaltgruppe, ein Telegramm an die Gruppenadresse. Anlegen, Namen und Mitglieder beschreibt die [Anleitung Gruppen](docs/gruppen.md).
 
 > Die implementierten Plattformen decken nicht die gesamte Funktionalität des
 > net4home-Systems ab. Daher bietet die net4home-Integration eine
@@ -113,6 +119,12 @@ Die Integration stellt Diagnose-Sensoren für jeden Gerätetyp zur Anzeige von K
 ### Jalousien
 - **Laufzeit**: Konfigurierte Laufzeit in Sekunden
 
+Ist am Kanal eine Laufzeit eingetragen, rechnet der Aktor seine Position selbst und meldet sie auf Anfrage in Prozent: 100 ist ganz auf, 0 ganz zu. Home Assistant zeigt diese Position. Nach dem Einschalten des Moduls kennt der Aktor sie erst, wenn die Jalousie einmal ganz auf oder ganz zu gefahren ist. Bis dahin ist die Position unbekannt.
+
+Fahrbefehle an den Kanal oder an eine Gruppe mit dem Kanal sieht Home Assistant auf dem Bus, auch die von Tastern. Die Jalousie zeigt dann **Öffnet** oder **Schließt**, und die Position läuft während der Fahrt mit. Am Ende der Fahrt fragt Home Assistant den Aktor nach der tatsächlichen Position.
+
+Mit Laufzeit lässt sich die Jalousie auf eine Position fahren. Home Assistant fährt los und sendet nach der berechneten Zeit Stopp. Ohne Laufzeit meldet der Aktor keine Position, die Jalousie zeigt dann nur auf oder zu nach dem letzten Fahrbefehl.
+
 Alle Diagnose-Sensoren werden automatisch aktualisiert, wenn die Gerätekonfiguration vom Bus gelesen wird.
 
 ## Einrichten von Geräten und Entitäten
@@ -125,9 +137,7 @@ Um eine stabile und fehlerfreie Funktionsweise zu gewährleisten, sollte die Kon
 
 Eigentlich sollte bereits alles korrekt konfiguriert sein. Die Erfahrung zeigt jedoch, dass wir hier etwas nacharbeiten müssen, da oft etwas nachgerüstet oder angepasst wurde. Über die Jahre gibt es sicherlich einige Dinge, die mit wenigen Klicks aufgeräumt werden können. Dies ist der wichtigste Teil einer sauberen Integration. Eine spätere Nacharbeit ist sehr zeitaufwändig.
 
-> Änderungen an Statusänderungen haben keinen Einfluss auf die bestehenden Funktionen.
-
-Das Flag **Statusänderung** muss für die folgenden Aktoren gesetzt werden. Dies ist wichtig, damit die HA immer Informationen über den aktuellen Status zur Anzeige erhält. Wenn beispielsweise eine Lampe durch einen normalen Schalter geschaltet wird, hat die HA hier keine Information. Es gibt auch die Statusänderung, die an andere Bus-Geräte kommuniziert wird.
+Das Flag **Statusänderung** muss für die folgenden Aktoren gesetzt werden. Sonst erfährt Home Assistant nicht, wenn ein Aktor von einer anderen Stelle geschaltet wird, zum Beispiel von einem Taster am Bus. Die Anzeige bleibt dann auf dem letzten bekannten Zustand.
 
 Die folgenden Module sind zu überprüfen:
 - HS-AR6
@@ -144,10 +154,18 @@ Die Integration stellt die folgenden benutzerdefinierten Dienste bereit:
 - `net4home.debug_devices`: Protokolliert alle registrierten Geräte im Home Assistant-Log
 - `net4home.clear_devices`: Löscht alle gespeicherten Geräte aus der Integration
 - `net4home.enum_all`: Löst die Geräteerkennung aus (ENUM_ALL-Befehl)
+- `net4home.assign_rf_key`: Ordnet einem UP-RF-Schlüssel eine Person und einen Namen zu
+- `net4home.remove_rf_key`: Entfernt einen Schlüssel aus dem RF-Schlüsselverzeichnis
+
+Die Einrichtung von Verzeichnis, Dashboard-Karte und Lesernamen beschreibt die [Anleitung UP-RF-Schlüssel](docs/rf-schluessel.md).
 
 ## Version
 
-Aktuelle Version: **1.3.0**
+Aktuelle Version: **1.3.1**
+
+## Fehlersuche
+
+Wo die Meldungen stehen, was bei einer abgerissenen Verbindung passiert und die häufigsten Fälle beschreibt die [Anleitung Fehlersuche](docs/fehlersuche.md).
 
 ## Support
 

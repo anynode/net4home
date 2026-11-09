@@ -1,4 +1,4 @@
-"""Lock the packet-dispatch indentation in api.py.
+"""Lock the packet-dispatch indentation in packet_dispatch.py.
 
 The HS-Time handler was dedented in 1.3.0. Python then ran it for every
 bus packet and attached value, status and button branches to the wrong if,
@@ -14,7 +14,7 @@ API_PATH = (
     Path(__file__).resolve().parents[1]
     / "custom_components"
     / "net4home"
-    / "api.py"
+    / "packet_dispatch.py"
 )
 
 
@@ -40,7 +40,7 @@ def _listen(tree: ast.AST) -> ast.AsyncFunctionDef:
     for node in ast.walk(tree):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "async_listen":
             return node
-    raise AssertionError("async_listen was not found in api.py")
+    raise AssertionError("async_listen was not found in packet_dispatch.py")
 
 
 class PacketDispatchStructureTest(unittest.TestCase):
