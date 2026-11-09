@@ -89,7 +89,9 @@ def sun_object_offsets(sw_version: Optional[str], tab_count: Optional[int] = Non
     """Offsets of today's sunrise and sunset from the base object.
 
     The configurator reads them at base + 1 + TabEntryCount and base + 2.
-    From software 2.01 the profile table has 48 lines, before that 16.
+    From user software 2.01 the profile table has 48 lines, before that 16.
+    ``4.04/2.01`` and the configurator form ``4.04/201`` are the same version.
+    ``4.03/1.22`` and ``4.03/122`` are the short table.
     """
     count = tab_count if tab_count in (16, 48) else None
     if count is None:
@@ -97,16 +99,33 @@ def sun_object_offsets(sw_version: Optional[str], tab_count: Optional[int] = Non
     return count + 1, count + 2
 
 
+def _parse_user_software(sw_version: Optional[str]) -> Optional[tuple[int, int]]:
+    """User software as (major, minor).
+
+    Home Assistant stores ``4.04/2.01``. The configurator prints the same
+    bytes without the dot, ``4.04/201`` for 2.01 and ``4.03/122`` for 1.22.
+    """
+    if not sw_version or "/" not in sw_version:
+        return None
+    user = sw_version.split("/", 1)[1].strip()
+    if user[:1] in ("V", "v"):
+        user = user[1:]
+    if "." in user:
+        major_text, _, minor_text = user.partition(".")
+        try:
+            return int(major_text), int(minor_text)
+        except ValueError:
+            return None
+    if user.isdigit() and len(user) >= 3:
+        number = int(user)
+        return number // 100, number % 100
+    return None
+
+
 def _user_version_at_least(sw_version: Optional[str], major: int, minor: int) -> bool:
     """True when the user part of a version such as ``4.04/2.01`` is high enough."""
-    if not sw_version or "/" not in sw_version:
-        return False
-    parts = sw_version.split("/", 1)[1].split(".")
-    if len(parts) < 2:
-        return False
-    try:
-        found = (int(parts[0]), int(parts[1]))
-    except ValueError:
+    found = _parse_user_software(sw_version)
+    if found is None:
         return False
     return found >= (major, minor)
 

@@ -86,8 +86,12 @@ class HsTimeTest(unittest.TestCase):
 
     def test_sun_objects_follow_the_profile_table(self) -> None:
         self.assertEqual(hs_time.sun_object_offsets("4.04/2.01"), (49, 50))
+        self.assertEqual(hs_time.sun_object_offsets("4.04/201"), (49, 50))
+        self.assertEqual(hs_time.sun_object_offsets("4.03/1.22"), (17, 18))
+        self.assertEqual(hs_time.sun_object_offsets("4.03/122"), (17, 18))
         self.assertEqual(hs_time.sun_object_offsets("4.04/1.08"), (17, 18))
         self.assertEqual(hs_time.sun_object_offsets("4.04/2.01", 16), (17, 18))
+        self.assertEqual(hs_time.sun_object_offsets("4.03/122", 48), (49, 50))
         self.assertEqual(hs_time.sun_object_offsets(None), (17, 18))
 
     def test_schedule_row_matches_the_configurator_columns(self) -> None:
