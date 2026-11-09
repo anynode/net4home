@@ -62,6 +62,38 @@ class HsTimeCommands:
                 mi=self._mi,
             )
 
+    async def _async_adopt_hs_time_base(
+        self,
+        device,
+        objadr: int,
+        *,
+        guessed: bool,
+        source: str,
+    ) -> None:
+        """Remember the HS-Time base object and read mask, sunrise and sunset."""
+        if device is None or not objadr or objadr <= 0:
+            return
+        changed = device.objadr != objadr
+        device.objadr = objadr
+        device.hs_objadr_guessed = guessed
+        if changed:
+            await self._async_save_objadr(device.device_id, objadr)
+            _LOGGER.info(
+                "HS-Time %s object %s from %s%s",
+                device.device_id,
+                objadr,
+                source,
+                ", guessed from the module number" if guessed else "",
+            )
+        sunrise_offset, sunset_offset = sun_object_offsets(
+            getattr(device, "sw_version", None),
+            getattr(device, "hs_tab_count", None),
+        )
+        device.hs_sunrise_obj = objadr + sunrise_offset
+        device.hs_sunset_obj = objadr + sunset_offset
+        if changed or getattr(device, "hs_profile_mask", None) is None:
+            await self._async_query_hs_time(device)
+
     async def async_set_hs_time_profile(self, device_id: str, index: int, turn_on: bool) -> None:
         """Turn one of the eight HS-Time profiles on or off."""
         device = self.devices.get(device_id)

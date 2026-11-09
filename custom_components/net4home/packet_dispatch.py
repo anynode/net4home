@@ -80,9 +80,9 @@ from .dimmer_layout import (
 )
 from .lcd_layout import lcd_base_from_modulspec
 from .hs_time import (
+    clock_object_address,
     module_info_from_reply,
     parse_hs_time_clock,
-    sun_object_offsets,
     sun_time_from_ack,
 )
 from .rf_keys import (
@@ -1475,75 +1475,71 @@ class PacketDispatch:
                                     # 1.5. HS-Time: Modul-Info (ddata[1] = $FF) - Basisadresse lesen
                                     if model == "HS-Time" and b1 == 0xFF:
                                         info = module_info_from_reply(paket.ddata, device_id)
-                                        if info is not None:
+                                        if info is not None and device:
                                             objadr = info["objadr"]
-                                            if info["guessed"] and device and device.objadr and device.objadr > 0:
+                                            guessed = info["guessed"]
+                                            if (
+                                                guessed
+                                                and device.objadr
+                                                and device.objadr > 0
+                                                and not getattr(device, "hs_objadr_guessed", False)
+                                            ):
                                                 objadr = device.objadr
+                                                guessed = False
                                             broadcast_index = info.get("broadcast_index")
-                                            if device:
-                                                device.objadr = objadr
-                                                # Persist objadr to config so it is available after HA restart
-                                                try:
-                                                    devices = dict(self._entry.options.get("devices", {}))
-                                                    if device_id in devices:
-                                                        devices[device_id]["objadr"] = objadr
-                                                        new_options = dict(self._entry.options)
-                                                        new_options["devices"] = devices
-                                                        self._hass.config_entries.async_update_entry(self._entry, options=new_options)
-                                                except Exception as e:
-                                                    _LOGGER.error(f"Failed to save objadr for {device_id}: {e}")
-                                                
-                                                if broadcast_index is not None:
-                                                    broadcast_intervals = {
-                                                        0: "Nie",
-                                                        1: "1 Minute",
-                                                        2: "5 Minuten",
-                                                        3: "15 Minuten",
-                                                        4: "30 Minuten",
-                                                        5: "60 Minuten",
-                                                        6: "2 Stunden",
-                                                        7: "4 Stunden",
-                                                        8: "8 Stunden",
-                                                        9: "12 Stunden",
-                                                        10: "24 Stunden",
-                                                    }
-                                                    broadcast_interval_str = broadcast_intervals.get(
-                                                        broadcast_index,
-                                                        f"Unbekannt ({broadcast_index})",
-                                                    )
-                                                    device.hs_broadcast_interval = broadcast_interval_str
-                                                    uid = device_id.upper()
-                                                    async_dispatcher_send(
-                                                        self._hass,
-                                                        f"net4home_update_{uid}",
-                                                        {"broadcast interval": broadcast_interval_str},
-                                                    )
-                                                    async_dispatcher_send(
-                                                        self._hass,
-                                                        f"net4home_update_{uid}_{slugify('broadcast interval')}",
-                                                        broadcast_interval_str,
-                                                    )
-                                                if info.get("tab_count") in (16, 48):
-                                                    device.hs_tab_count = info["tab_count"]
-                                                if info["guessed"]:
-                                                    _LOGGER.info(
-                                                        "HS-Time %s module info is %s bytes, using object %s, raw %s",
-                                                        device_id,
-                                                        len(paket.ddata),
-                                                        objadr,
-                                                        paket.ddata.hex(),
-                                                    )
-                                                sunrise_offset, sunset_offset = sun_object_offsets(
-                                                    getattr(device, "sw_version", None),
-                                                    getattr(device, "hs_tab_count", None),
+                                            if broadcast_index is not None:
+                                                broadcast_intervals = {
+                                                    0: "Nie",
+                                                    1: "1 Minute",
+                                                    2: "5 Minuten",
+                                                    3: "15 Minuten",
+                                                    4: "30 Minuten",
+                                                    5: "60 Minuten",
+                                                    6: "2 Stunden",
+                                                    7: "4 Stunden",
+                                                    8: "8 Stunden",
+                                                    9: "12 Stunden",
+                                                    10: "24 Stunden",
+                                                }
+                                                broadcast_interval_str = broadcast_intervals.get(
+                                                    broadcast_index,
+                                                    f"Unbekannt ({broadcast_index})",
                                                 )
-                                                device.hs_sunrise_obj = objadr + sunrise_offset
-                                                device.hs_sunset_obj = objadr + sunset_offset
-                                                await self._async_query_hs_time(device)
-                                            else:
-                                                _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK HS-Time 0xFF: Device {device_id} not found, cannot set objadr")
+                                                device.hs_broadcast_interval = broadcast_interval_str
+                                                uid = device_id.upper()
+                                                async_dispatcher_send(
+                                                    self._hass,
+                                                    f"net4home_update_{uid}",
+                                                    {"broadcast interval": broadcast_interval_str},
+                                                )
+                                                async_dispatcher_send(
+                                                    self._hass,
+                                                    f"net4home_update_{uid}_{slugify('broadcast interval')}",
+                                                    broadcast_interval_str,
+                                                )
+                                            if info.get("tab_count") in (16, 48):
+                                                device.hs_tab_count = info["tab_count"]
+                                            if info["guessed"]:
+                                                _LOGGER.info(
+                                                    "HS-Time %s module info is %s bytes and has no address, raw %s",
+                                                    device_id,
+                                                    len(paket.ddata),
+                                                    paket.ddata.hex(),
+                                                )
+                                            await self._async_adopt_hs_time_base(
+                                                device,
+                                                objadr,
+                                                guessed=guessed,
+                                                source="module info",
+                                            )
+                                        elif device is None:
+                                            _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK HS-Time 0xFF: Device {device_id} not found, cannot set objadr")
                                         else:
-                                            _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for HS-Time 0xFF: {len(paket.ddata)} bytes")
+                                            _LOGGER.warning(
+                                                "D0_RD_MODULSPEC_DATA_ACK packet too short for HS-Time 0xFF: %s bytes, raw %s",
+                                                len(paket.ddata),
+                                                paket.ddata.hex(),
+                                            )
                                         continue
                             
                                     # 1.6. LCD3 (UP-LCD): b1..b2 = Adresse (Big Endian), $FFFF = Kapazitäts-Info
@@ -1663,6 +1659,20 @@ class PacketDispatch:
                                                     clock["time"],
                                                     clock["synced"],
                                                     clock["reception"],
+                                                )
+                                            learned = clock_object_address(
+                                                mi_device.objadr,
+                                                bool(getattr(mi_device, "hs_objadr_guessed", False)),
+                                                paket.objsrc,
+                                                mask_known=getattr(mi_device, "hs_profile_mask", None)
+                                                is not None,
+                                            )
+                                            if learned is not None:
+                                                await self._async_adopt_hs_time_base(
+                                                    mi_device,
+                                                    learned,
+                                                    guessed=False,
+                                                    source="clock",
                                                 )
                                             continue
 

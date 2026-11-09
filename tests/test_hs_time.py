@@ -84,6 +84,21 @@ class HsTimeTest(unittest.TestCase):
         self.assertEqual(hs_time.sun_time_from_ack(bytes([101, 50, 0, 0xFF, 0xC4])), "01:00-")
         self.assertIsNone(hs_time.sun_time_from_ack(bytes([101, 50, 6])))
 
+    def test_clock_object_replaces_a_missing_address(self) -> None:
+        self.assertEqual(hs_time.clock_object_address(None, False, 59601), 59601)
+        self.assertEqual(
+            hs_time.clock_object_address(26401, True, 59601),
+            59601,
+        )
+        self.assertEqual(
+            hs_time.clock_object_address(26401, False, 59601, mask_known=False),
+            59601,
+        )
+        self.assertIsNone(
+            hs_time.clock_object_address(59601, False, 59601, mask_known=True)
+        )
+        self.assertIsNone(hs_time.clock_object_address(59601, False, 0))
+
     def test_short_module_info_uses_the_module_number(self) -> None:
         # Firmware 4.03/1.22 answers line 0xFF with three bytes and no address.
         short = hs_time.module_info_from_reply(bytes([38, 0xFF, 0x00]), "MI0264")

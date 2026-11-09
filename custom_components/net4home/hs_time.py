@@ -85,6 +85,28 @@ def sun_time_from_ack(ddata: bytes) -> Optional[str]:
     return f"{text}-" if negative else text
 
 
+def clock_object_address(
+    current: Optional[int],
+    guessed: bool,
+    objsrc: Optional[int],
+    *,
+    mask_known: bool = False,
+) -> Optional[int]:
+    """Object address carried by the minute clock, when module info has none.
+
+    Firmware 4.03/1.22 does not put the address in the module-info reply.
+    The clock broadcast names the object it comes from. That address replaces
+    a missing one, a guess, and a stored address whose mask was never read.
+    Once the mask has been read, an address the module itself reported stays.
+    """
+    if not objsrc or objsrc <= 0:
+        return None
+    if not current or current <= 0 or current != objsrc:
+        if not current or current <= 0 or guessed or not mask_known:
+            return int(objsrc)
+    return None
+
+
 def object_base_from_module(device_id: Optional[str]) -> Optional[int]:
     """Default object address of a module, such as 26401 for MI0264."""
     if not device_id or not str(device_id).upper().startswith("MI"):
