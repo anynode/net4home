@@ -48,6 +48,10 @@ class Net4HomeDevice:
         self.powerup_status = powerup_status
         self.min_hell = min_hell
         self.timer_time1 = timer_time1
+        # Last received climate sensor values (presetday/presetnight/targettemp) for fallback in entities
+        self.presetday: Optional[float] = None
+        self.presetnight: Optional[float] = None
+        self.targettemp: Optional[float] = None
 
 
 class TN4Hpaket(NamedTuple):

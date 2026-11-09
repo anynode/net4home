@@ -64,10 +64,16 @@ class Net4HomeClimate(ClimateEntity):
         self._attr_name = device.name
         self._attr_unique_id = f"{entry.entry_id}_{slugify(device.via_device or 'unknown')}_{slugify(device.device_id)}"
         self._attr_hvac_mode = HVACMode.HEAT
-        self._attr_target_temperature = 21.0
+        self._attr_target_temperature = (
+            device.targettemp if getattr(device, "targettemp", None) is not None else 21.0
+        )
         self._attr_current_temperature = 21.0
-        self._attr_presetday_temperature = 20
-        self._attr_presetnight_temperature = 10.0
+        self._attr_presetday_temperature = (
+            device.presetday if getattr(device, "presetday", None) is not None else 20.0
+        )
+        self._attr_presetnight_temperature = (
+            device.presetnight if getattr(device, "presetnight", None) is not None else 10.0
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -111,9 +117,9 @@ class Net4HomeClimate(ClimateEntity):
     @callback
     def _handle_update(self, data: dict):
         """Handle incoming update from API."""
-        # Update HVAC Mode based on status bits (if available)
+        # Update HVAC Mode only when explicitly in payload (e.g. D0_ACTOR_ACK / D0_SET_N), not on targettemp-only updates (D0_SET)
         hvac_mode_str = data.get("hvac_mode")
-        if hvac_mode_str:
+        if hvac_mode_str is not None:
             if hvac_mode_str == "heat":
                 self._attr_hvac_mode = HVACMode.HEAT
             elif hvac_mode_str == "cool":
@@ -122,14 +128,21 @@ class Net4HomeClimate(ClimateEntity):
                 self._attr_hvac_mode = HVACMode.HEAT_COOL
             elif hvac_mode_str == "off":
                 self._attr_hvac_mode = HVACMode.OFF
-        else:
-            # Fallback: Use is_on (for compatibility)
+        elif "is_on" in data:
+            # Fallback: Use is_on only when explicitly present (for compatibility)
             self._attr_hvac_mode = HVACMode.HEAT if data.get("is_on", True) else HVACMode.OFF
+        # else: do not change _attr_hvac_mode (e.g. D0_SET only sends targettemp)
         
-        self._attr_target_temperature = data.get("targettemp", self._attr_target_temperature)
+        self._attr_target_temperature = data.get("targettemp") if "targettemp" in data else (
+            self.device.targettemp if getattr(self.device, "targettemp", None) is not None else self._attr_target_temperature
+        )
         self._attr_current_temperature = data.get("current_temp", self._attr_current_temperature)
-        self._attr_presetday_temperature = data.get("presetday", self._attr_presetday_temperature)
-        self._attr_presetnight_temperature = data.get("presetnight", self._attr_presetnight_temperature)
+        self._attr_presetday_temperature = data.get("presetday") if "presetday" in data else (
+            self.device.presetday if getattr(self.device, "presetday", None) is not None else self._attr_presetday_temperature
+        )
+        self._attr_presetnight_temperature = data.get("presetnight") if "presetnight" in data else (
+            self.device.presetnight if getattr(self.device, "presetnight", None) is not None else self._attr_presetnight_temperature
+        )
         self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:

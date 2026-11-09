@@ -136,6 +136,7 @@ async def register_device_in_registry(
     na: Optional[int] = None,
     nm: Optional[int] = None,
     ng: Optional[int] = None,
+    timer_time1: Optional[int] = None,
 ) -> None:
     """Register a net4home device and create the corresponding entity."""
     entry_id = entry.entry_id
@@ -176,6 +177,8 @@ async def register_device_in_registry(
             "nm": nm,
             "ng": ng,
         }
+        if timer_time1 is not None:
+            new_config["timer_time1"] = timer_time1
         # Compare all fields that might change
         for key, val in new_config.items():
             if current.get(key) != val:
@@ -205,13 +208,14 @@ async def register_device_in_registry(
                 except (ValueError, TypeError):
                     pass
             
-            # Load module_type, ns, na, nm, ng from config
+            # Load module_type, ns, na, nm, ng, timer_time1 from config
             module_type_loaded = existing_device.get("module_type")
             ns_loaded = existing_device.get("ns")
             na_loaded = existing_device.get("na")
             nm_loaded = existing_device.get("nm")
             ng_loaded = existing_device.get("ng")
-            
+            timer_time1_loaded = timer_time1 if timer_time1 is not None else existing_device.get("timer_time1")
+
             # Create device object and store it in api.devices
             device = Net4HomeDevice(
                 device_id=device_id,
@@ -230,12 +234,16 @@ async def register_device_in_registry(
                 na=na_loaded if na_loaded is not None else na,
                 nm=nm_loaded if nm_loaded is not None else nm,
                 ng=ng_loaded if ng_loaded is not None else ng,
+                timer_time1=timer_time1_loaded,
             )
             api.devices[device_id] = device
             _LOGGER.debug(f"Device {device_id} added to api.devices (already existing)")
         elif api and device_id in api.devices:
             # Update existing device with new module information if available
             device = api.devices[device_id]
+            device.send_state_changes = send_state_changes
+            if timer_time1 is not None:
+                device.timer_time1 = timer_time1
             if module_type is not None:
                 device.module_type = module_type
             if ns is not None:
@@ -246,7 +254,7 @@ async def register_device_in_registry(
                 device.nm = nm
             if ng is not None:
                 device.ng = ng
-        
+
         return
 
     _LOGGER.info(f"Registered new device: {device_type or 'unknown'} / {device_id}")
@@ -282,6 +290,7 @@ async def register_device_in_registry(
         na=na,
         nm=nm,
         ng=ng,
+        timer_time1=timer_time1,
     )
 
     if api:
@@ -289,8 +298,8 @@ async def register_device_in_registry(
     else:
         _LOGGER.warning(f"No API reference – device {device_id} not saved to internal registry")
 
-    # Supported entity types
-    known_types = {"light", "switch", "cover", "binary_sensor", "climate", "sensor", "rf_reader", "alarm_control_panel"}
+    # Supported entity types (include "module" so MI-only devices like HS-PaketRouter get the Read Device button)
+    known_types = {"light", "switch", "cover", "binary_sensor", "climate", "sensor", "rf_reader", "alarm_control_panel", "module"}
     if device_type in known_types:
         _LOGGER.debug(f"Dispatching new {device_type} entity for {device_id}")
         async_dispatcher_send(hass, f"net4home_new_device_{entry_id}", device)
@@ -307,6 +316,7 @@ async def register_device_in_registry(
             "model": device.model,
             "device_type": device.device_type,
             "via_device": device.via_device,
+            "objadr": device.objadr,
             "send_state_changes": send_state_changes,
             "inverted": device.inverted,
             "detail_status": device.detail_status,
@@ -321,6 +331,8 @@ async def register_device_in_registry(
         }
         if device.last_detail_request:
             device_data["last_detail_request"] = device.last_detail_request.isoformat()
+        if timer_time1 is not None:
+            device_data["timer_time1"] = timer_time1
         devices[device_id] = device_data
         hass.config_entries.async_update_entry(entry, options={"devices": devices})
         _LOGGER.debug(f"Device {device_id} saved to config entry options")

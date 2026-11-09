@@ -7,7 +7,7 @@ from homeassistant.core import callback
 from homeassistant.util import slugify
 from .api import Net4HomeApi, Net4HomeDevice
 
-from .const import DOMAIN, PLATINE_HW_IS_LCD3, CI_LCD_OPT_BLINK, CI_LCD_OPT_BUZZER_ON
+from .const import DOMAIN, PLATINE_HW_IS_LCD3, PLATINE_HW_IS_BELL2, CI_LCD_OPT_BLINK, CI_LCD_OPT_BUZZER_ON
 from .helpers import parent_device_link
 
 import logging
@@ -74,8 +74,8 @@ class Net4HomeMasterkeyLearningButton(ButtonEntity):
 
 
 class Net4HomeReadDeviceConfigButton(ButtonEntity):
-    """Button entity for reading device configuration."""
-    
+    """Button entity for reading device configuration (same for all MI modules: UP-T, UP-TLH, etc.)."""
+
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:file-document-outline"
 
@@ -86,6 +86,11 @@ class Net4HomeReadDeviceConfigButton(ButtonEntity):
         self.device = device
         self._attr_name = f"{device.name} Read Device"
         self._attr_unique_id = f"{entry.entry_id}_read_config_{slugify(device.device_id)}"
+
+    @property
+    def available(self) -> bool:
+        """Return True if the device is still in the API so the button is pressable."""
+        return self.api.get_known_device(self.device.device_id) is not None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -108,6 +113,150 @@ class Net4HomeReadDeviceConfigButton(ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press to read device configuration."""
         await self.api.async_read_device_config(self.device.device_id)
+
+
+class Net4HomeBellOnButton(ButtonEntity):
+    """Button entity for WAV-Bell EIN (On)."""
+
+    _attr_icon = "mdi:bell-check"
+
+    def __init__(self, api, entry, device):
+        self.api = api
+        self.entry = entry
+        self.device = device
+        self._attr_name = f"{device.name} EIN"
+        self._attr_unique_id = f"{entry.entry_id}_bell_on_{slugify(device.device_id)}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device.device_id.upper())},
+            name=self.device.name,
+            manufacturer="net4home",
+            model=self.device.model,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
+        )
+
+    @property
+    def available(self) -> bool:
+        return self.api.get_known_device(self.device.device_id) is not None
+
+    async def async_added_to_hass(self):
+        translations = await async_get_translations(self.hass, DOMAIN, "button")
+        label = translations.get("bell_on", "EIN")
+        self._attr_name = f"{self.device.name} {label}"
+        self.async_write_ha_state()
+
+    async def async_press(self) -> None:
+        await self.api.async_send_bell_command(self.device.device_id, "ON")
+
+
+class Net4HomeBellOffButton(ButtonEntity):
+    """Button entity for WAV-Bell AUS (Off)."""
+
+    _attr_icon = "mdi:bell-off"
+
+    def __init__(self, api, entry, device):
+        self.api = api
+        self.entry = entry
+        self.device = device
+        self._attr_name = f"{device.name} AUS"
+        self._attr_unique_id = f"{entry.entry_id}_bell_off_{slugify(device.device_id)}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device.device_id.upper())},
+            name=self.device.name,
+            manufacturer="net4home",
+            model=self.device.model,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
+        )
+
+    @property
+    def available(self) -> bool:
+        return self.api.get_known_device(self.device.device_id) is not None
+
+    async def async_added_to_hass(self):
+        translations = await async_get_translations(self.hass, DOMAIN, "button")
+        label = translations.get("bell_off", "AUS")
+        self._attr_name = f"{self.device.name} {label}"
+        self.async_write_ha_state()
+
+    async def async_press(self) -> None:
+        await self.api.async_send_bell_command(self.device.device_id, "OFF")
+
+
+class Net4HomeBellVolumeUpButton(ButtonEntity):
+    """Button entity for WAV-Bell LAUTER (Volume Up)."""
+
+    _attr_icon = "mdi:volume-plus"
+
+    def __init__(self, api, entry, device):
+        self.api = api
+        self.entry = entry
+        self.device = device
+        self._attr_name = f"{device.name} LAUTER"
+        self._attr_unique_id = f"{entry.entry_id}_bell_vol_up_{slugify(device.device_id)}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device.device_id.upper())},
+            name=self.device.name,
+            manufacturer="net4home",
+            model=self.device.model,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
+        )
+
+    @property
+    def available(self) -> bool:
+        return self.api.get_known_device(self.device.device_id) is not None
+
+    async def async_added_to_hass(self):
+        translations = await async_get_translations(self.hass, DOMAIN, "button")
+        label = translations.get("bell_vol_up", "LAUTER")
+        self._attr_name = f"{self.device.name} {label}"
+        self.async_write_ha_state()
+
+    async def async_press(self) -> None:
+        await self.api.async_send_bell_command(self.device.device_id, "INC_VOL")
+
+
+class Net4HomeBellVolumeDownButton(ButtonEntity):
+    """Button entity for WAV-Bell LEISER (Volume Down)."""
+
+    _attr_icon = "mdi:volume-minus"
+
+    def __init__(self, api, entry, device):
+        self.api = api
+        self.entry = entry
+        self.device = device
+        self._attr_name = f"{device.name} LEISER"
+        self._attr_unique_id = f"{entry.entry_id}_bell_vol_down_{slugify(device.device_id)}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device.device_id.upper())},
+            name=self.device.name,
+            manufacturer="net4home",
+            model=self.device.model,
+            **parent_device_link(self.hass, self.entry.entry_id, self.device.via_device),
+        )
+
+    @property
+    def available(self) -> bool:
+        return self.api.get_known_device(self.device.device_id) is not None
+
+    async def async_added_to_hass(self):
+        translations = await async_get_translations(self.hass, DOMAIN, "button")
+        label = translations.get("bell_vol_down", "LEISER")
+        self._attr_name = f"{self.device.name} {label}"
+        self.async_write_ha_state()
+
+    async def async_press(self) -> None:
+        await self.api.async_send_bell_command(self.device.device_id, "DEC_VOL")
 
 
 class Net4HomeLCDBlinkButton(ButtonEntity):
@@ -239,6 +388,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 _LOGGER.debug(f"[Button] Adding LCD buttons for new device {device.device_id} (module_type={device.module_type}, model={device.model})")
                 buttons_to_add.append(Net4HomeLCDBlinkButton(api, entry, device))
                 buttons_to_add.append(Net4HomeLCDBuzzerButton(api, entry, device))
+            # For WAV-Bell (PLATINE_HW_IS_BELL2): EIN/AUS/LAUTER/LEISER buttons
+            is_wav_bell = device.module_type == PLATINE_HW_IS_BELL2 or device.model == ".WAV-Bell"
+            if is_wav_bell:
+                _LOGGER.debug(f"[Button] Adding WAV-Bell buttons for {device.device_id} (module_type={device.module_type}, model={device.model})")
+                buttons_to_add.append(Net4HomeBellOnButton(api, entry, device))
+                buttons_to_add.append(Net4HomeBellOffButton(api, entry, device))
+                buttons_to_add.append(Net4HomeBellVolumeUpButton(api, entry, device))
+                buttons_to_add.append(Net4HomeBellVolumeDownButton(api, entry, device))
             async_add_entities(buttons_to_add)
 
     entry.async_on_unload(
@@ -247,21 +404,32 @@ async def async_setup_entry(hass, entry, async_add_entities):
         )
     )
     
-    # Also listen for device updates to add LCD buttons when device info becomes available
+    # Also listen for device updates to add LCD or WAV-Bell buttons when device info becomes available
     async def async_device_updated(device_id: str = None):
-        """Handle device updates - add LCD buttons if device is now identified as UP-LCD."""
+        """Handle device updates - add LCD or WAV-Bell buttons when objadr etc. becomes available."""
         if device_id:
-            device = api.devices.get(device_id)
-            if device and (device.module_type == PLATINE_HW_IS_LCD3 or device.model == "UP-LCD"):
-                # Check if LCD buttons already exist
-                # We can't easily check this, so we'll just try to add them
-                # Home Assistant will ignore duplicates based on unique_id
-                _LOGGER.debug(f"[Button] Device updated, checking LCD buttons for {device_id} (module_type={device.module_type}, model={device.model})")
-                buttons_to_add = []
-                buttons_to_add.append(Net4HomeLCDBlinkButton(api, entry, device))
-                buttons_to_add.append(Net4HomeLCDBuzzerButton(api, entry, device))
-                async_add_entities(buttons_to_add)
-                _LOGGER.info(f"[Button] Added LCD buttons for {device_id} after device update")
+            device = api.get_known_device(device_id)
+            if not device:
+                device = api.devices.get(device_id)
+            if device:
+                if device.module_type == PLATINE_HW_IS_LCD3 or device.model == "UP-LCD":
+                    _LOGGER.debug(f"[Button] Device updated, adding LCD buttons for {device_id}")
+                    buttons_to_add = [
+                        Net4HomeLCDBlinkButton(api, entry, device),
+                        Net4HomeLCDBuzzerButton(api, entry, device),
+                    ]
+                    async_add_entities(buttons_to_add)
+                    _LOGGER.info(f"[Button] Added LCD buttons for {device_id} after device update")
+                elif device.module_type == PLATINE_HW_IS_BELL2 or device.model == ".WAV-Bell":
+                    _LOGGER.debug(f"[Button] Device updated, adding WAV-Bell buttons for {device_id}")
+                    buttons_to_add = [
+                        Net4HomeBellOnButton(api, entry, device),
+                        Net4HomeBellOffButton(api, entry, device),
+                        Net4HomeBellVolumeUpButton(api, entry, device),
+                        Net4HomeBellVolumeDownButton(api, entry, device),
+                    ]
+                    async_add_entities(buttons_to_add)
+                    _LOGGER.info(f"[Button] Added WAV-Bell buttons for {device_id} after device update")
     
     # Listen for device updates (when objadr is set, etc.)
     entry.async_on_unload(

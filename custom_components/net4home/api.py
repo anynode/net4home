@@ -277,24 +277,9 @@ class N4HPacketSender:
             # === Kompression & Verpackung
             compressed = compress_section(sendbus)
             final_bytes = bytes.fromhex(compressed)
-
-            # === Logging
-            ddata_list = " ".join(ddata.hex()[i:i+2].upper() for i in range(0, len(ddata.hex()), 2))
-            log_line = (
-                f"SEND: ipsrc=0x{mi:04X}, ipdst=0x{ipdst:04X}, objsrc={objsource}, "
-                f"datalen={len(ddata)}, ddata=[{ddata_list}], "
-                f"final_bytes={compressed}"
-            )
-            # _LOGGER.debug(log_line)
-            
             # === Senden
-            _LOGGER.debug(
-                f"[IP] Writing {len(final_bytes)} bytes to connection "
-                f"(compressed hex: {final_bytes[:32].hex() if len(final_bytes) >= 32 else final_bytes.hex()})"
-            )
             self._writer.write(final_bytes)
             await self._writer.drain()
-            _LOGGER.debug(f"[IP] Data sent successfully ({len(final_bytes)} bytes)")
 
         except Exception as e:
             _LOGGER.error(f"[IP] Error sending data (raw): {e}", exc_info=True)
@@ -313,6 +298,7 @@ class Net4HomeApi:
         objadr: int = DEFAULT_OBJADR,
         entry_id: Optional[str] = None,
         entry=None,
+        auto_discovery_enabled: bool = True,
     ):
         """Initialize the net4home API."""
         self._hass = hass
@@ -327,8 +313,10 @@ class Net4HomeApi:
         self._packet_receiver = N4HPacketReceiver()
         self._packet_sender: Optional[N4HPacketSender] = None
         self.devices: dict[str, Net4HomeDevice] = {}
-        self._reconnect_enabled = True      
+        self._reconnect_enabled = True
         self._entry = entry
+        self._auto_discovery_enabled = auto_discovery_enabled
+        self._discovery_pending: set[str] = set()
         
         # Detail retrieval queue management
         self._detail_queue: Optional[asyncio.Queue] = None
@@ -496,8 +484,6 @@ class Net4HomeApi:
         no_data_count = 0
         while True:
                 try:
-                    _LOGGER.debug(f"[IP] Waiting for data from reader...")
-                    
                     data = await self._reader.read(4096)
                     
                     if not data:
@@ -516,18 +502,8 @@ class Net4HomeApi:
                     else:
                         no_data_count = 0  # Reset counter on successful read
                         packet_count += 1
-                        _LOGGER.info(
-                            f"[IP] Received {len(data)} bytes "
-                            f"(packet #{packet_count}, hex: {data[:min(32, len(data))].hex()})"
-                        )
-                        
                         # Process the received data
                         packets = self._packet_receiver.receive_raw_command(data)
-                        _LOGGER.debug(
-                            f"[IP] Packet receiver processed data: "
-                            f"{len(packets)} packets extracted from {len(data)} bytes"
-                        )
-                        
                         for ptype, payload in packets:
                             try:
                                 ret, paket = n4h_parse(payload)
@@ -545,6 +521,67 @@ class Net4HomeApi:
                             if paket.ddatalen != 0:
                                 # Identify the action what we have to do
                                 b0 = paket.ddata[0]
+                                # Auto-discover unknown MI devices that are sending packets
+                                # If we receive a packet from an MI device we don't know about, query it
+                                if self._auto_discovery_enabled and paket.ipsrc > 0 and paket.ipsrc < 0xFF00:  # Valid MI address range
+                                    mi_device_id = f"MI{paket.ipsrc:04X}"
+                                    if mi_device_id not in self.devices and mi_device_id not in self._discovery_pending:
+                                        # Unknown MI device - send discovery query (only once per device)
+                                        _LOGGER.info(f"Auto-discovering unknown MI device {mi_device_id} (detected from packet b0=0x{b0:02X})")
+                                        self._discovery_pending.add(mi_device_id)
+                                        try:
+                                            await self._packet_sender.send_raw_command(
+                                                ipdst=paket.ipsrc,
+                                                ddata=bytes([D0_ENABLE_CONFIGURATION, 0xD3, 0x00]),
+                                                objsource=self._objadr,
+                                                mi=self._mi,
+                                                type8=SEND_AS_IP,
+                                            )
+                                            _LOGGER.debug(f"Sent D0_ENABLE_CONFIGURATION to {mi_device_id} for auto-discovery")
+                                        except Exception as e:
+                                            _LOGGER.error(f"Failed to send discovery query to {mi_device_id}: {e}")
+                                
+                                # UP-TLH/UP-T: Commands sent TO the device (by any bus participant) – update from ipdest
+                                if b0 == D0_SET and len(paket.ddata) >= 3:
+                                    device = self._find_up_tlh_by_objadr(paket.ipdest)
+                                    if device:
+                                        # ddata[1] = Sollwert_High, ddata[2] = Sollwert_Low (Doku High/Low)
+                                        sollwert_temp = (paket.ddata[1] * 256 + paket.ddata[2]) / 10.0
+                                        device.targettemp = sollwert_temp
+                                        dispatch_id = device.device_id.upper()
+                                        async_dispatcher_send(self._hass, f"net4home_update_{dispatch_id}", {"targettemp": sollwert_temp})
+                                        async_dispatcher_send(self._hass, f"net4home_update_{dispatch_id}_targettemp", sollwert_temp)
+                                
+                                if b0 == D0_WR_MODULSPEC_DATA and len(paket.ddata) >= 6 and paket.ddata[1] == 0xF0:
+                                    device_id_mi = f"MI{paket.ipdest:04X}"
+                                    device = self.get_known_device(device_id_mi)
+                                    if device and device.model in ("UP-TLH", "UP-T"):
+                                        presetday = (paket.ddata[2] * 256 + paket.ddata[3]) / 10.0
+                                        presetnight = (paket.ddata[4] * 256 + paket.ddata[5]) / 10.0
+                                        device.presetday = presetday
+                                        device.presetnight = presetnight
+                                        dispatch_id = device.device_id.upper()
+                                        async_dispatcher_send(self._hass, f"net4home_update_{dispatch_id}", {"presetday": presetday, "presetnight": presetnight})
+                                        async_dispatcher_send(self._hass, f"net4home_update_{dispatch_id}_presetday", presetday)
+                                        async_dispatcher_send(self._hass, f"net4home_update_{dispatch_id}_presetnight", presetnight)
+                                
+                                if b0 == D0_SET_N and len(paket.ddata) >= 2:
+                                    device = self._find_up_tlh_by_objadr(paket.ipdest)
+                                    if device:
+                                        status = paket.ddata[1]
+                                        heat_active = (status & 1) != 0
+                                        cool_active = (status & 2) != 0
+                                        if heat_active and cool_active:
+                                            hvac_mode = "heat_cool"
+                                        elif heat_active:
+                                            hvac_mode = "heat"
+                                        elif cool_active:
+                                            hvac_mode = "cool"
+                                        else:
+                                            hvac_mode = "off"
+                                        dispatch_id = device.device_id.upper()
+                                        update_data = {"hvac_mode": hvac_mode, "heat_active": heat_active, "cool_active": cool_active}
+                                        async_dispatcher_send(self._hass, f"net4home_update_{dispatch_id}", update_data)
                                 
                                 # Discovered a module, maybe we know it (enum all or enum for a single module)
                                 if b0 == D0_ACK_TYP:
@@ -613,7 +650,6 @@ class Net4HomeApi:
                                         # objadr will be set later from the 0xFF packet (D0_RD_MODULSPEC_DATA_ACK)
                                         objadr=None
                                         
-                                    # _LOGGER.debug(f"ACK_TYP received for device: {device_id} ({device_type}) ({model}) ({objadr}) ({sw_version})")
 
                                     # Extract module type information from D0_ACK_TYP before registration
                                     module_type = None
@@ -684,11 +720,6 @@ class Net4HomeApi:
                                                     f"{len(paket.ddata)} bytes (expected 14+), using defaults for missing fields"
                                                 )
                                             
-                                            _LOGGER.debug(
-                                                f"Stored module info for {device_id}: "
-                                                f"type={device.module_type}, ns={device.ns}, na={device.na}, "
-                                                f"ng={device.ng}, nm={device.nm}, packet_len={len(paket.ddata)}"
-                                            )
                                         
                                         # Request sensor data for UP-RF devices to discover sensor object addresses
                                         # (These requests are fast and can be done immediately)
@@ -699,6 +730,11 @@ class Net4HomeApi:
                                         
                                         # Add device to detail queue (for further detail queries)
                                         await self.async_queue_device_for_details(device_id)
+                                        
+                                        # Persist module metadata to options so module data is never missing after restart
+                                        await self._async_save_module_metadata(
+                                            device_id, sw_version, module_type, ns, na, nm, ng
+                                        )
                                             
                                     except Exception as e:
                                         _LOGGER.error(f"Error during registration of device (module) {device_id}: {e}")
@@ -737,10 +773,21 @@ class Net4HomeApi:
                                                     # Remove from set on error so we can retry later
                                                     self._enum_sent_to.discard(mi_address)
                                             else:
-                                                _LOGGER.debug(f"D0_ACTOR_ACK from unknown MI device {device_id}, ENUM already sent, waiting for D0_ACK_TYP")
-                                            continue
+                                                continue
 
-                                    # _LOGGER.debug(f"D0_ACTOR_ACK for *** {device_id}: {device.device_type} - obj {device.objadr} - {paket.objsrc}")
+                                    # For multi-channel actor modules (e.g. HS-AD1-1x10V): D0_ACTOR_ACK refers to the channel (OBJ), not the module (MI).
+                                    # Commands go to the actor (OBJ); UP-TLH/UP-T (climate) keep using MI and are unchanged.
+                                    if device.device_type == 'module':
+                                        obj_device_id = f"OBJ{paket.objsrc:05d}"
+                                        obj_device = self.get_known_device(obj_device_id)
+                                        if obj_device:
+                                            device_id = obj_device_id
+                                            device = obj_device
+                                        else:
+                                            continue  # OBJ channel not yet registered, skip
+
+                                    if device.device_type == 'rf_reader':
+                                        continue  # UP-RF: no actor entities, RF-Key updates via D0_VALUE_ACK
 
                                     if device.device_type == 'climate':
                                         # For UP-TLH/UP-T: Determine sensor type based on objadr relationship
@@ -786,22 +833,24 @@ class Net4HomeApi:
                                                 else:
                                                     hvac_mode = "off"
                                                 
-                                                _LOGGER.debug(f"D0_ACTOR_ACK for {device_id}: {sensor_key} = {temp}°C, status=0x{status_byte:02X} (heat={heat_active}, cool={cool_active}, mode={hvac_mode})")
-                                                
-                                                # Send updates to the MI device (where sensors were created)
+                                                if sensor_key == "targettemp":
+                                                    device.targettemp = temp
+                                                elif sensor_key == "presetday":
+                                                    device.presetday = temp
+                                                elif sensor_key == "presetnight":
+                                                    device.presetnight = temp
+                                                # Send updates to the MI device (where sensors were created); use uppercase for dispatcher key
+                                                dispatch_id = device_id.upper()
                                                 update_data = {
                                                     sensor_key: temp,
                                                     "hvac_mode": hvac_mode,
                                                     "heat_active": heat_active,
                                                     "cool_active": cool_active
                                                 }
-                                                async_dispatcher_send(self._hass, f"net4home_update_{device_id}", update_data)
-                                                async_dispatcher_send(self._hass, f"net4home_update_{device_id}_{sensor_key}", temp)
+                                                async_dispatcher_send(self._hass, f"net4home_update_{dispatch_id}", update_data)
+                                                async_dispatcher_send(self._hass, f"net4home_update_{dispatch_id}_{sensor_key}", temp)
                                             else:
                                                 _LOGGER.warning(f"D0_ACTOR_ACK packet too short for climate: {len(paket.ddata)} bytes, expected at least 4")
-                                        else:
-                                            _LOGGER.debug(f"D0_ACTOR_ACK for {device_id}: No matching sensor type (objadr={device.objadr}, paket.objsrc={paket.objsrc})")
-
                                     else:
                                         # Check if packet has enough data (need at least 3 bytes)
                                         if len(paket.ddata) < 3:
@@ -839,7 +888,6 @@ class Net4HomeApi:
                                             _LOGGER.warning(f"Unhandled device type in D0_ACTOR_ACK: {device.device_type} ({device.model}) for {device_id}")
 
                                 elif b0 == D0_RD_ACTOR_DATA_ACK:
-                                    _LOGGER.debug(f"D0_RD_ACTOR_DATA_ACK identified Type: {paket.ddata[2]}")
                                     
                                     b1  = paket.ddata[1] + 1 # channel
                                     b2  = paket.ddata[2]     # actor type
@@ -886,7 +934,6 @@ class Net4HomeApi:
                                     # Check module type for dimmer detection
                                     if device_obj and device_obj.model in ('HS-AD1-1x10V', 'HS-AD3e', 'HS-AD3'):
                                         is_dimmer = True
-                                        _LOGGER.debug(f"Dimmer module detected: {device_obj.model} for {device_id}, b2={b2}")
                                         
                                     if device_obj and device_obj.model in ('HS-AJ3', 'HS-AJ1', 'HS-AJ4-500', 'HS-AJ3-6'):
                                         is_jal = True
@@ -898,15 +945,12 @@ class Net4HomeApi:
                                         for existing_device in self.devices.values():
                                             if existing_device.via_device == via_device and existing_device.device_type == "light":
                                                 is_dimmer = True
-                                                _LOGGER.debug(f"Dimmer module detected through existing Light entities for {device_id}, b2={b2}")
                                                 break
                                     
                                     # Timer entries have priority and are detected regardless of module type
                                     # IMPORTANT: Timer check must occur BEFORE dimmer check
                                     # Timer is also detected on dimmer modules if b2 == OUT_HW_NR_IS_TIMER
                                     if b2 == OUT_HW_NR_IS_TIMER:
-                                        _LOGGER.info(f"OUT_HW_NR_IS_TIMER identified: {device_id} (module: {device_obj.model if device_obj else 'unknown'}, is_dimmer={is_dimmer}, b2={b2})")
-
                                         # Module details
                                         b3  = paket.ddata[3]     # time1 hi
                                         b4  = paket.ddata[4]     # time1 lo
@@ -932,23 +976,22 @@ class Net4HomeApi:
                                                 api=self,
                                                 objadr=objadr,
                                                 send_state_changes = bool(b7),
+                                                timer_time1=t1,
                                             )
                                             # Store powerup status and timer time1 in device (also for already existing devices)
                                             if device_id in self.devices:
                                                 self.devices[device_id].powerup_status = b5
                                                 self.devices[device_id].timer_time1 = t1
-                                                _LOGGER.debug(f"Powerup status for {device_id} stored: {b5}, Timer time1: {t1}s")
+                                                await self._async_save_device_timer_time1(device_id, t1)
                                                 # Sende Signal zur Aktualisierung der Diagnose-Sensoren
                                                 async_dispatcher_send(self._hass, f"net4home_diagnostic_update_{device_id}")
                                             else:
                                                 _LOGGER.warning(f"Device {device_id} not found in api.devices, cannot store powerup status")
-                                            _LOGGER.debug(f"OUT_HW_NR_IS_TIMER identified: {device_id} - CH{b1} t1{t1} - State change {bool(b7)} - Powerup: {b5}")
                                         except Exception as e:
                                             _LOGGER.error(f"Error during registration of TIMER device (channel) {device_id}: {e}")
                                     
                                     # Wenn OUT_HW_NR_IS_ONOFF und is_dimmer, dann als Dimmer behandeln
                                     elif b2 == OUT_HW_NR_IS_ONOFF and is_dimmer:
-                                        _LOGGER.debug(f"OUT_HW_NR_IS_ONOFF identified as DIMMER: {device_id}")
                                         
                                         # Module details
                                         b3  = paket.ddata[3]     # time1 hi
@@ -980,19 +1023,16 @@ class Net4HomeApi:
                                             if device_id in self.devices:
                                                 self.devices[device_id].powerup_status = b5
                                                 self.devices[device_id].min_hell = b6
-                                                _LOGGER.debug(f"Powerup status for {device_id} saved: {b5}, MinHell: {b6}%")
                                                 # Sende Signal zur Aktualisierung der Diagnose-Sensoren
                                                 async_dispatcher_send(self._hass, f"net4home_diagnostic_update_{device_id}")
                                             else:
                                                 _LOGGER.warning(f"Device {device_id} not found in api.devices, cannot store powerup status")
-                                            _LOGGER.debug(f"OUT_HW_NR_IS_ONOFF (as DIMMER) identified: {device_id} - CH{b1} t1{t1} - State change {bool(b7)} - Powerup: {b5} - MinHell: {b6}%")
                                         except Exception as e:
                                             _LOGGER.error(f"Error during registration of DIMMER device (channel) {device_id}: {e}", exc_info=True)
 
                                     # We have a classic switch with ON/OFF feature
                                     # IMPORTANT: Only for real ON/OFF actors, NOT for dimmers (they have OUT_HW_NR_IS_DIMMER)
                                     elif b2 == OUT_HW_NR_IS_ONOFF and not is_dimmer:
-                                        _LOGGER.debug(f"OUT_HW_NR_IS_ONOFF identified: {device_id}")
 
                                         # Module details
                                         b3  = paket.ddata[3]     # time1 hi
@@ -1009,10 +1049,6 @@ class Net4HomeApi:
                                         device_type="switch"
                                         
                                         try:
-                                            _LOGGER.debug(
-                                                f"Registering OBJ device {device_id} with via_device={via_device}, "
-                                                f"parent_exists={via_device in self.devices}"
-                                            )
                                             await register_device_in_registry(
                                                 hass=self._hass,
                                                 entry=self._entry,
@@ -1030,18 +1066,15 @@ class Net4HomeApi:
                                             # Store powerup status in device (also for already existing devices)
                                             if device_id in self.devices:
                                                 self.devices[device_id].powerup_status = b5
-                                                _LOGGER.debug(f"Powerup status for {device_id} stored: {b5}")
                                                 # Sende Signal zur Aktualisierung der Diagnose-Sensoren
                                                 async_dispatcher_send(self._hass, f"net4home_diagnostic_update_{device_id}")
                                             else:
                                                 _LOGGER.warning(f"Device {device_id} not found in api.devices, cannot store powerup status")
-                                            _LOGGER.debug(f"OUT_HW_NR_IS_ONOFF identified: {device_id} - CH{b1} t1{t1} - State change {bool(b7)} - Powerup: {b5}")
                                         except Exception as e:
                                             _LOGGER.error(f"Error during registration of ONOFF device (channel) {device_id}: {e}", exc_info=True)
 
                                     # We have a dimmer
                                     elif b2 == OUT_HW_NR_IS_DIMMER:
-                                        _LOGGER.debug(f"OUT_HW_NR_IS_DIMMER identified: {device_id}")
 
                                         # Module details
                                         b3  = paket.ddata[3]     # time1 hi
@@ -1073,19 +1106,16 @@ class Net4HomeApi:
                                             if device_id in self.devices:
                                                 self.devices[device_id].powerup_status = b5
                                                 self.devices[device_id].min_hell = b6
-                                                _LOGGER.debug(f"Powerup status for {device_id} saved: {b5}, MinHell: {b6}%")
                                                 # Sende Signal zur Aktualisierung der Diagnose-Sensoren
                                                 async_dispatcher_send(self._hass, f"net4home_diagnostic_update_{device_id}")
                                             else:
                                                 _LOGGER.warning(f"Device {device_id} not found in api.devices, cannot store powerup status")
-                                            _LOGGER.debug(f"OUT_HW_NR_IS_DIMMER identified: {device_id} - CH{b1} t1{t1} - State change {bool(b7)} - Powerup: {b5} - MinHell: {b6}%")
                                         except Exception as e:
                                             _LOGGER.error(f"Error during registration of DIMMER device (channel) {device_id}: {e}", exc_info=True)
 
                                     # We have a cover 
                                     elif b2 == OUT_HW_NR_IS_JAL or is_jal:
 
-                                        _LOGGER.debug(f"OUT_HW_NR_IS_JAL Paket : {' '.join(f'{b:02X}' for b in paket.ddata)}")
 
                                         # Module details
                                         b3  = paket.ddata[3]     # time1 hi
@@ -1093,7 +1123,6 @@ class Net4HomeApi:
                                         b7  = paket.ddata[7]     # Status update
                                         t1  = b3*256+b4 # time1 (Run time for covers)
                                         
-                                        _LOGGER.debug(f"OUT_HW_NR_IS_JAL identified: {device_id}")
 
                                         try:
                                             await register_device_in_registry(
@@ -1109,16 +1138,19 @@ class Net4HomeApi:
                                                 api=self,
                                                 objadr=objadr,
                                                 send_state_changes = bool(b7),
+                                                timer_time1=t1,
                                             )
                                             # Store run time (Timer1) in device (also for already existing devices)
                                             if device_id in self.devices:
                                                 self.devices[device_id].timer_time1 = t1
-                                                _LOGGER.debug(f"Run time for {device_id} stored: {t1}s")
-                                                # Sende Signal zur Aktualisierung der Diagnose-Sensoren
+                                                self.devices[device_id].send_state_changes = bool(b7)
+                                                await self._async_save_device_timer_time1(device_id, t1)
                                                 async_dispatcher_send(self._hass, f"net4home_diagnostic_update_{device_id}")
                                             else:
-                                                _LOGGER.warning(f"Device {device_id} not found in api.devices, cannot store run time")
-                                            _LOGGER.debug(f"OUT_HW_NR_IS_JAL identified: {device_id} - CH{b1} - State change {bool(b7)} - Run time: {t1}s")
+                                                _LOGGER.warning(
+                                                    "[JAL] device_id=%s not in api.devices (keys: %s), cannot store run time",
+                                                    device_id, list(self.devices.keys())[:20],
+                                                )
                                         except Exception as e:
                                             _LOGGER.error(f"Error during registration of COVER device (channel) {device_id}: {e}")
 
@@ -1147,7 +1179,6 @@ class Net4HomeApi:
                                         continue
                                     
                                     pin_typ = paket.ddata[EE_OFFSET_PIN_IS]
-                                    #_LOGGER.debug(f"D0_RD_SENSOR_DATA_ACK identified: Typ: {pin_typ} - {' '.join(f'{b:02X}' for b in paket.ddata)}")
 
                                     channel = paket.ddata[1] + 1
                                     function_count, _ = get_function_and_address_count(pin_typ)
@@ -1161,7 +1192,6 @@ class Net4HomeApi:
                                     else:
                                         detected_inverted = False
                                     
-                                    #_LOGGER.debug(f"Erkannte objadr: {objadr} (Offset {EE_OFFSET_ADR})")
 
                                     if objadr == 0:
                                         _LOGGER.warning(
@@ -1202,14 +1232,9 @@ class Net4HomeApi:
                                             _LOGGER.error(f"Failed to create MI device {via_device}")
                                             continue
 
-                                    #_LOGGER.debug(f"D0_RD_SENSOR_DATA_ACK → model: {device_id}, objadr: {objadr}, via: {via_device}, model: {getattr(device_obj, 'model', 'UNKNOWN')}")
 
                                     if device_obj and is_binary_input_module(device_obj.model):
                                         try:
-                                            _LOGGER.debug(
-                                                f"Registering OBJ sensor device {device_id} with via_device={via_device}, "
-                                                f"parent_exists={via_device in self.devices}"
-                                            )
                                             await register_device_in_registry(
                                                 hass=self._hass,
                                                 entry=self._entry,
@@ -1224,7 +1249,6 @@ class Net4HomeApi:
                                                 objadr=objadr,
                                                 inverted=detected_inverted,  
                                             )
-                                            #_LOGGER.debug(f"SENSOR registration for  → model: {device_id}, objadr: {objadr}, via: {via_device}, model: {getattr(device_obj, 'model', 'UNKNOWN')}")
                                         except Exception as e:
                                             _LOGGER.error(f"Error during SENSOR registration for {device_id}: {e}", exc_info=True)
                                     
@@ -1233,7 +1257,7 @@ class Net4HomeApi:
                                     if device_obj and device_obj.model in ('UP-RF', 'UP-RF-S4AR1'):
                                         # Store OBJ address mapping for RF-Key message routing
                                         # We'll map OBJ addresses to the parent MI device in D0_VALUE_ACK handler
-                                        _LOGGER.debug(f"UP-RF sensor object address detected: {device_id} (OBJ={objadr}) for {via_device}, channel: {channel}")
+                                        pass
 
                                 elif b0 == D0_SENSOR_ACK:
                                     if len(paket.ddata) < 3:
@@ -1265,8 +1289,6 @@ class Net4HomeApi:
                                     )
 
                                 elif b0 == D0_RD_MODULSPEC_DATA_ACK:
-                                    _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK identified: Typ: {paket.ddata[1]} - {' '.join(f'{b:02X}' for b in paket.ddata)}")
-
                                     b1  = paket.ddata[1] 
                                     obj_heat = None
                                     obj_cool = None
@@ -1291,10 +1313,8 @@ class Net4HomeApi:
                                     
                                     # 1. UP-TLH / UP-T: Spezielle Indizes und Sensoren
                                     if model in ('UP-TLH', 'UP-T'):
-                                        _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK UP_TLH")
                                         # Special indices (0xF0, 0xF1) only for UP-TLH/UP-T
                                         if b1 == 0xF0:  # Tag/Nachtwert (UP-TLH/UP-T)
-                                            _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK UP_TLH -> F0")
                                             if len(paket.ddata) >= 6:
                                                 # Laut Dokumentation: Tagwert = (ddata[2] * 256 + ddata[3]) / 10.0
                                                 # ddata[2] = Tagwert High, ddata[3] = Tagwert Low
@@ -1312,7 +1332,6 @@ class Net4HomeApi:
                                             continue
                                         
                                         if b1 == 0xF1:  # Heat/Cool Objektadressen (UP-TLH/UP-T)
-                                            _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK UP_TLH -> F1")
                                             if len(paket.ddata) >= 10:
                                                 b2 = paket.ddata[2]
                                                 b3 = paket.ddata[3]
@@ -1323,19 +1342,36 @@ class Net4HomeApi:
                                                 objadr = (b2 << 8) + b3
                                                 obj_heat = (b6 << 8) + b7
                                                 obj_cool = (b8 << 8) + b9
-                                                _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK 0xF1: objadr={objadr}, obj_heat={obj_heat}, obj_cool={obj_cool}")
+                                                
+                                                # CRITICAL FIX: If objadr is 0, calculate fallback from MI address
+                                                # Pattern: MI0263 → objadr=26301 (263*100+1), MI0003 → objadr=301 (3*100+1)
+                                                if objadr == 0:
+                                                    mi_addr = paket.ipsrc
+                                                    objadr = mi_addr * 100 + 1
+                                                    _LOGGER.info(f"D0_RD_MODULSPEC_DATA_ACK 0xF1: objadr was 0, using fallback: MI{mi_addr:04X} * 100 + 1 = {objadr}")
+                                                
                                                 # Store objadr in device object for later use when b1 < 0x80
                                                 device.objadr = objadr
+                                                # Persist objadr to config so D0_SET and other listeners work after HA restart without Read Device
+                                                try:
+                                                    devices = dict(self._entry.options.get("devices", {}))
+                                                    if device_id in devices:
+                                                        devices[device_id]["objadr"] = objadr
+                                                        new_options = dict(self._entry.options)
+                                                        new_options["devices"] = devices
+                                                        self._hass.config_entries.async_update_entry(self._entry, options=new_options)
+                                                except Exception as e:
+                                                    _LOGGER.error(f"Failed to save objadr for {device_id}: {e}")
                                                 
                                                 # Sende D0_REQ an die Basisadresse, um targettemp zu lesen
                                                 # Laut Dokumentation: D0_REQ, 0, 0 → Sollwert-Objektadresse (objadr + 0)
+                                                # Sende D0_REQ an die Basisadresse, um targettemp zu lesen
                                                 await self._packet_sender.send_raw_command(
                                                     ipdst=objadr,
                                                     ddata=bytes([D0_REQ, 0x00, 0x00]),
                                                     objsource=self._objadr,
                                                     mi=self._mi,
                                                 )
-                                                _LOGGER.debug(f"Sent D0_REQ for targettemp to {device_id} (OBJ={objadr}) after 0xF1")
                                             else:
                                                 _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for 0xF1: {len(paket.ddata)} bytes")
                                             continue
@@ -1406,7 +1442,6 @@ class Net4HomeApi:
                                     
                                     # 1.5. HS-Time: Modul-Info (ddata[1] = $FF) - Basisadresse lesen
                                     if model == "HS-Time" and b1 == 0xFF:
-                                        _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK HS-Time -> FF (Modul-Info)")
                                         if len(paket.ddata) >= 5:
                                             # Laut Dokumentation: ddata[2] = Objektadresse High, ddata[3] = Objektadresse Low
                                             objadr_high = paket.ddata[2]
@@ -1414,53 +1449,64 @@ class Net4HomeApi:
                                             objadr = (objadr_high << 8) + objadr_low
                                             # ddata[4] = Broadcast-Index (0-7)
                                             broadcast_index = paket.ddata[4]
-                                            _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK HS-Time 0xFF: objadr={objadr}, broadcast_index={broadcast_index}")
                                             # Speichere objadr im device Objekt
-                                            device.objadr = objadr
-                                    
-                                            # Broadcast-Intervall-Mapping (laut korrigierter Dokumentation)
-                                            broadcast_intervals = {
-                                                0: "Nie",
-                                                1: "1 Minute",
-                                                2: "5 Minuten",
-                                                3: "15 Minuten",
-                                                4: "30 Minuten",
-                                                5: "60 Minuten",
-                                                6: "2 Stunden",
-                                                7: "4 Stunden",
-                                                8: "8 Stunden",
-                                                9: "12 Stunden",
-                                                10: "24 Stunden"
-                                            }
-                                            broadcast_interval_str = broadcast_intervals.get(broadcast_index, f"Unbekannt ({broadcast_index})")
-                                    
-                                            # Sende Broadcast-Intervall direkt an das MI-Device (wie bei UP-TLH)
-                                            # WICHTIG: sensor_key ist "broadcast interval" (mit Leerzeichen), aber Dispatcher-Key verwendet slugify
-                                            dispatcher_key_dict = f"net4home_update_{device_id}"
-                                            dispatcher_key_sensor = f"net4home_update_{device_id}_{slugify('broadcast interval')}"
-                                            async_dispatcher_send(self._hass, dispatcher_key_dict, {"broadcast interval": broadcast_interval_str})
-                                            async_dispatcher_send(self._hass, dispatcher_key_sensor, broadcast_interval_str)
-                                            _LOGGER.debug(f"HS-Time: Broadcast Interval for {device_id}: index={broadcast_index}, value='{broadcast_interval_str}', keys: {dispatcher_key_dict}, {dispatcher_key_sensor}")
-                                    
-                                            # Store Sunrise/Sunset object addresses for later D0_VALUE_REQ queries
-                                            sunrise_objadr = objadr + 17
-                                            sunset_objadr = objadr + 18
-                                    
-                                            # Send D0_VALUE_REQ for Sunrise and Sunset (values are stored directly on MI device)
-                                            await self._packet_sender.send_raw_command(
-                                                ipdst=sunrise_objadr,
-                                                ddata=bytes([D0_VALUE_REQ, 0x00, 0x00]),
-                                                objsource=self._objadr,
-                                                mi=self._mi,
-                                            )
-                                            await asyncio.sleep(0.1)
-                                            await self._packet_sender.send_raw_command(
-                                                ipdst=sunset_objadr,
-                                                ddata=bytes([D0_VALUE_REQ, 0x00, 0x00]),
-                                                objsource=self._objadr,
-                                                mi=self._mi,
-                                            )
-                                            _LOGGER.debug(f"HS-Time: Sent D0_VALUE_REQ for Sunrise/Sunset (objadr={objadr}, sunrise={sunrise_objadr}, sunset={sunset_objadr})")
+                                            if device:
+                                                device.objadr = objadr
+                                                # Persist objadr to config so it is available after HA restart
+                                                try:
+                                                    devices = dict(self._entry.options.get("devices", {}))
+                                                    if device_id in devices:
+                                                        devices[device_id]["objadr"] = objadr
+                                                        new_options = dict(self._entry.options)
+                                                        new_options["devices"] = devices
+                                                        self._hass.config_entries.async_update_entry(self._entry, options=new_options)
+                                                except Exception as e:
+                                                    _LOGGER.error(f"Failed to save objadr for {device_id}: {e}")
+                                                
+                                                # Broadcast-Intervall-Mapping (laut korrigierter Dokumentation)
+                                                broadcast_intervals = {
+                                                    0: "Nie",
+                                                    1: "1 Minute",
+                                                    2: "5 Minuten",
+                                                    3: "15 Minuten",
+                                                    4: "30 Minuten",
+                                                    5: "60 Minuten",
+                                                    6: "2 Stunden",
+                                                    7: "4 Stunden",
+                                                    8: "8 Stunden",
+                                                    9: "12 Stunden",
+                                                    10: "24 Stunden"
+                                                }
+                                                broadcast_interval_str = broadcast_intervals.get(broadcast_index, f"Unbekannt ({broadcast_index})")
+                                                
+                                                # Sende Broadcast-Intervall direkt an das MI-Device (wie bei UP-TLH)
+                                                # WICHTIG: sensor_key ist "broadcast interval" (mit Leerzeichen), aber Dispatcher-Key verwendet slugify
+                                                uid = device_id.upper()
+                                                dispatcher_key_dict = f"net4home_update_{uid}"
+                                                dispatcher_key_sensor = f"net4home_update_{uid}_{slugify('broadcast interval')}"
+                                                async_dispatcher_send(self._hass, dispatcher_key_dict, {"broadcast interval": broadcast_interval_str})
+                                                async_dispatcher_send(self._hass, dispatcher_key_sensor, broadcast_interval_str)
+                                                
+                                                # Store Sunrise/Sunset object addresses for later D0_VALUE_REQ queries
+                                                sunrise_objadr = objadr + 17
+                                                sunset_objadr = objadr + 18
+                                                
+                                                # Send D0_VALUE_REQ for Sunrise and Sunset (values are stored directly on MI device)
+                                                await self._packet_sender.send_raw_command(
+                                                    ipdst=sunrise_objadr,
+                                                    ddata=bytes([D0_VALUE_REQ, 0x00, 0x00]),
+                                                    objsource=self._objadr,
+                                                    mi=self._mi,
+                                                )
+                                                await asyncio.sleep(0.1)
+                                                await self._packet_sender.send_raw_command(
+                                                    ipdst=sunset_objadr,
+                                                    ddata=bytes([D0_VALUE_REQ, 0x00, 0x00]),
+                                                    objsource=self._objadr,
+                                                    mi=self._mi,
+                                                )
+                                            else:
+                                                _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK HS-Time 0xFF: Device {device_id} not found, cannot set objadr")
                                         else:
                                             _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for HS-Time 0xFF: {len(paket.ddata)} bytes")
                                         continue
@@ -1468,10 +1514,8 @@ class Net4HomeApi:
                                     # 1.6. LCD3 (UP-LCD): b1..b2 = Adresse (Big Endian), $FFFF = Kapazitäts-Info
                                     # IMPORTANT: Check LCD BEFORE SensorConfig/PIR to avoid conflicts with b1 == 0
                                     elif model and 'LCD' in model.upper():
-                                        _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK LCD3 for {device_id}: model={model}, ddata_len={len(paket.ddata)}, ddata[0:5]={[hex(b) for b in paket.ddata[:5]]}")
                                         if len(paket.ddata) >= 3:
                                             adr_insert = paket.ddata[1] * 256 + paket.ddata[2]  # Big Endian
-                                            _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK LCD3 for {device_id}: adr_insert={adr_insert:04X}")
                                             if adr_insert == 0xFFFF:
                                                 # Capacity info
                                                 if len(paket.ddata) >= 11:
@@ -1479,8 +1523,6 @@ class Net4HomeApi:
                                                     size_strn = (paket.ddata[5] << 8) | paket.ddata[6]  # Big Endian
                                                     size_str = (paket.ddata[7] << 8) | paket.ddata[8]  # Big Endian
                                                     size_node = (paket.ddata[9] << 8) | paket.ddata[10]  # Big Endian
-                                                    _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK LCD3 capacity for {device_id}: "
-                                                                f"SizeCfg={size_cfg}, SizeStrN={size_strn}, SizeStr={size_str}, SizeNODE={size_node}")
                                                 else:
                                                     _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for LCD3 Kapazität: {len(paket.ddata)} bytes")
                                             elif adr_insert == 0:
@@ -1505,14 +1547,13 @@ class Net4HomeApi:
                                                             new_options = dict(self._entry.options)
                                                             new_options["devices"] = devices
                                                             self._hass.config_entries.async_update_entry(self._entry, options=new_options)
-                                                            _LOGGER.debug(f"Saved objadr={adr_uk} for {device_id} to config entry")
                                                     except Exception as e:
                                                         _LOGGER.error(f"Failed to save objadr for {device_id}: {e}")
                                                 else:
                                                     _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for LCD3 config: {len(paket.ddata)} bytes (need at least 5 bytes for adrUK)")
                                             else:
                                                 # Normal line data (other lines)
-                                                _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK LCD3 line for {device_id}: adr={adr_insert:04X}")
+                                                pass
                                         else:
                                             _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for LCD3: {len(paket.ddata)} bytes")
                                         continue
@@ -1538,11 +1579,10 @@ class Net4HomeApi:
                                                         new_options = dict(self._entry.options)
                                                         new_options["devices"] = devices
                                                         self._hass.config_entries.async_update_entry(self._entry, options=new_options)
-                                                        _LOGGER.debug(f"Saved objadr={adr_uk} for {device_id} to config entry (WAV-Bell)")
                                                 except Exception as e:
                                                     _LOGGER.error(f"Failed to save objadr for {device_id}: {e}")
                                             else:
-                                                _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK WAV-Bell line for {device_id}: line_index={line_index}")
+                                                pass
                                         else:
                                             _LOGGER.warning(
                                                 f"D0_RD_MODULSPEC_DATA_ACK packet too short for WAV-Bell: {len(paket.ddata)} bytes"
@@ -1557,15 +1597,12 @@ class Net4HomeApi:
                                                 tab_entry_count = paket.ddata[2]
                                                 adr_obj_ir = paket.ddata[3] * 256 + paket.ddata[4]  # Little Endian
                                                 tab2_entry_count = paket.ddata[5]
-                                                _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK IR_TX module info for {device_id}: "
-                                                            f"TabEntries={tab_entry_count}, ObjAdr={adr_obj_ir}, Tab2Entries={tab2_entry_count}")
                                             else:
                                                 _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for IR_TX Modul-Info: {len(paket.ddata)} bytes")
                                         elif b1 < 0x80:
                                             # Haupttabelle
                                             if len(paket.ddata) >= 26:
                                                 tab_index = b1
-                                                _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK IR_TX table for {device_id}: Index={tab_index}")
                                                 # Table data can be stored for later use
                                             else:
                                                 _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for IR_TX Tabelle: {len(paket.ddata)} bytes")
@@ -1573,7 +1610,6 @@ class Net4HomeApi:
                                             # MaxPower-Tabelle
                                             if len(paket.ddata) >= 34:
                                                 tab2_index = b1 - 0xC0
-                                                _LOGGER.debug(f"D0_RD_MODULSPEC_DATA_ACK IR_TX MaxPower for {device_id}: Index={tab2_index}")
                                                 # Table data can be stored for later use
                                             else:
                                                 _LOGGER.warning(f"D0_RD_MODULSPEC_DATA_ACK packet too short for IR_TX MaxPower: {len(paket.ddata)} bytes")
@@ -2371,6 +2407,18 @@ class Net4HomeApi:
             _LOGGER.warning(f"Unknown device: {device_id}")
         return device
 
+    def _find_up_tlh_by_objadr(self, objadr: int):
+        """Find a UP-TLH or UP-T climate device by its setpoint object address."""
+        for device in self.devices.values():
+            if (
+                device.device_type == "climate"
+                and device.model in ("UP-TLH", "UP-T")
+                and device.objadr is not None
+                and device.objadr == objadr
+            ):
+                return device
+        return None
+
     async def async_set_climate_mode(self, device_id: str, hvac_mode: str, target_temp: float = None):
         """Set climate mode using D0_SET_N: bit0 = Heat ON, bit1 = Cool ON.
         
@@ -2810,6 +2858,50 @@ class Net4HomeApi:
         if pending_count > 0:
             _LOGGER.info(f"Restored {pending_count} pending devices to detail queue")
 
+    async def _async_save_module_metadata(
+        self,
+        device_id: str,
+        sw_version: str,
+        module_type: Optional[int],
+        ns: Optional[int],
+        na: Optional[int],
+        nm: Optional[int],
+        ng: Optional[int],
+    ):
+        """Persist module metadata (sw_version, type, na, ng, etc.) to config options.
+        Ensures module data is never missing after restart or comparison quirks."""
+        if not self._entry:
+            return
+        try:
+            devices = dict(self._entry.options.get("devices", {}))
+            if device_id not in devices:
+                _LOGGER.debug(
+                    "[module metadata] device_id=%s not in options, skipping save",
+                    device_id,
+                )
+                return
+            dev = devices[device_id]
+            dev["sw_version"] = sw_version or dev.get("sw_version", "")
+            if module_type is not None:
+                dev["module_type"] = module_type
+            if ns is not None:
+                dev["ns"] = ns
+            if na is not None:
+                dev["na"] = na
+            if nm is not None:
+                dev["nm"] = nm
+            if ng is not None:
+                dev["ng"] = ng
+            new_options = dict(self._entry.options)
+            new_options["devices"] = devices
+            self._hass.config_entries.async_update_entry(self._entry, options=new_options)
+            _LOGGER.debug(
+                "[module metadata] Saved for %s: sw_version=%s type=%s na=%s ng=%s",
+                device_id, sw_version, module_type, na, ng,
+            )
+        except Exception as e:
+            _LOGGER.warning("Failed to save module metadata for %s: %s", device_id, e)
+
     async def _async_save_device_detail_status(self, device_id: str, status: str):
         """Save detail_status in Config Entry Options."""
         if not self._entry:
@@ -2831,3 +2923,22 @@ class Net4HomeApi:
         except Exception as e:
             _LOGGER.error(f"Failed to save detail_status for {device_id}: {e}")
 
+    async def _async_save_device_timer_time1(self, device_id: str, timer_time1: int):
+        """Save timer_time1 in Config Entry Options (for cover run time and switch timer)."""
+        if not self._entry:
+            return
+        try:
+            devices = dict(self._entry.options.get("devices", {}))
+            if device_id in devices:
+                devices[device_id]["timer_time1"] = timer_time1
+                new_options = dict(self._entry.options)
+                new_options["devices"] = devices
+                self._hass.config_entries.async_update_entry(self._entry, options=new_options)
+                _LOGGER.debug(f"Saved timer_time1={timer_time1} for {device_id}")
+            else:
+                _LOGGER.debug(
+                    "[timer_time1 save] device_id=%r not in options (sample keys: %s)",
+                    device_id, list(devices.keys())[:15],
+                )
+        except Exception as e:
+            _LOGGER.error(f"Failed to save timer_time1 for {device_id}: {e}")

@@ -85,6 +85,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
                 na=na,
                 nm=nm,
                 ng=ng,
+                timer_time1=dev.get("timer_time1"),
             )
             api.devices[normalized_device_id] = device
             loaded_devices.append((device, sw_version, hw_version))

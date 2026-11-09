@@ -112,7 +112,7 @@ class Net4HomeAlarmControlPanel(AlarmControlPanelEntity):
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
-                f"net4home_update_{self.device.device_id}",
+                f"net4home_update_{self.device.device_id.upper()}",
                 self._handle_update,
             )
         )

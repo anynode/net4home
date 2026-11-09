@@ -15,6 +15,7 @@ from .const import (
     DEFAULT_OBJADR,
     CONF_MI,
     CONF_OBJADR,
+    CONF_AUTO_DISCOVERY,
 )
 from .api import Net4HomeApi
 
@@ -25,11 +26,7 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step - go directly to IP configuration."""
-        return await self.async_step_ip(user_input=None)
-
-    async def async_step_ip(self, user_input=None):
-        """Handle IP connection configuration."""
+        """Handle the initial step – show IP/connection form (step_id=user so config.step.user translations are used)."""
         errors = {}
 
         schema = vol.Schema({
@@ -39,6 +36,7 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_MI, default=DEFAULT_MI): int,
             vol.Required(CONF_OBJADR, default=DEFAULT_OBJADR): int,
             vol.Optional("discover", default=False): bool,
+            vol.Optional(CONF_AUTO_DISCOVERY, default=True): bool,
         })
 
         if user_input is not None:
@@ -71,6 +69,7 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                     "password": user_input["password"],
                     CONF_MI: user_input[CONF_MI],
                     CONF_OBJADR: user_input[CONF_OBJADR],
+                    CONF_AUTO_DISCOVERY: user_input.get(CONF_AUTO_DISCOVERY, True),
                 }
                 # devices are not created during initial setup – that is done by the options flow
                 return self.async_create_entry(
@@ -79,7 +78,7 @@ class Net4HomeFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         return self.async_show_form(
-            step_id="ip",
+            step_id="user",
             data_schema=schema,
             errors=errors,
         )
@@ -119,20 +118,23 @@ class Net4HomeOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(CONF_MI, default=current_mi): int,
             vol.Optional(CONF_OBJADR, default=current_objadr): int,
             vol.Optional("trigger_enum_all", default=False): bool,
+            vol.Optional(CONF_AUTO_DISCOVERY, default=self.config_entry.data.get(CONF_AUTO_DISCOVERY, True)): bool,
         }
         
         schema = vol.Schema(schema_dict)
         
         if user_input is not None:
-            # If MI or OBJADR were changed, update config.data
-            if CONF_MI in user_input or CONF_OBJADR in user_input:
+            # If MI, OBJADR, or AUTO_DISCOVERY were changed, update config.data
+            if CONF_MI in user_input or CONF_OBJADR in user_input or CONF_AUTO_DISCOVERY in user_input:
                 new_data = dict(self.config_entry.data)
                 if CONF_MI in user_input:
                     new_data[CONF_MI] = user_input[CONF_MI]
                 if CONF_OBJADR in user_input:
                     new_data[CONF_OBJADR] = user_input[CONF_OBJADR]
+                if CONF_AUTO_DISCOVERY in user_input:
+                    new_data[CONF_AUTO_DISCOVERY] = user_input[CONF_AUTO_DISCOVERY]
                 self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
-                _LOGGER.info(f"[net4home] MI/OBJADR updated: MI={new_data.get(CONF_MI)}, OBJADR={new_data.get(CONF_OBJADR)}")
+                _LOGGER.info(f"[net4home] Configuration updated: MI={new_data.get(CONF_MI)}, OBJADR={new_data.get(CONF_OBJADR)}, AUTO_DISCOVERY={new_data.get(CONF_AUTO_DISCOVERY)}")
             
             # If ENUM_ALL should be triggered
             if user_input.get("trigger_enum_all"):
