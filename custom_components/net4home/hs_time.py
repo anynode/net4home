@@ -85,6 +85,47 @@ def sun_time_from_ack(ddata: bytes) -> Optional[str]:
     return f"{text}-" if negative else text
 
 
+def object_base_from_module(device_id: Optional[str]) -> Optional[int]:
+    """Default object address of a module, such as 26401 for MI0264."""
+    if not device_id or not str(device_id).upper().startswith("MI"):
+        return None
+    text = str(device_id)[2:]
+    if not text.isdigit():
+        return None
+    number = int(text)
+    if number <= 0:
+        return None
+    return number * 100 + 1
+
+
+def module_info_from_reply(ddata: bytes, device_id: Optional[str]) -> Optional[dict]:
+    """Base address from a modulspec line 0xFF.
+
+    Current firmware sends the address in bytes 2 and 3 and the broadcast
+    index in byte 4. Firmware 4.03/1.22 answers the same read with 3 bytes
+    and no address. The object is then the module number, as with MI0264
+    at 26401. A stored address still wins over that guess.
+    """
+    if len(ddata) < 3 or ddata[1] != 0xFF:
+        return None
+    address = None
+    if len(ddata) >= 4:
+        address = ((ddata[2] & 0xFF) << 8) | (ddata[3] & 0xFF)
+        if address <= 0:
+            address = None
+    guessed = address is None
+    if guessed:
+        address = object_base_from_module(device_id)
+    if address is None:
+        return None
+    info = {"objadr": address, "guessed": guessed}
+    if len(ddata) >= 5:
+        info["broadcast_index"] = ddata[4] & 0xFF
+    if len(ddata) >= 10 and ddata[9] in (16, 48):
+        info["tab_count"] = ddata[9]
+    return info
+
+
 def sun_object_offsets(sw_version: Optional[str], tab_count: Optional[int] = None) -> tuple[int, int]:
     """Offsets of today's sunrise and sunset from the base object.
 

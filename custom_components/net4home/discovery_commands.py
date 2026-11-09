@@ -482,7 +482,7 @@ class DiscoveryCommands:
                         # For HS-Time: Query for module info (0xFF) to get base address
                         await self._packet_sender.send_raw_command(
                             ipdst=mi_addr,
-                            ddata=bytes([D0_RD_MODULSPEC_DATA, 0xFF]),
+                            ddata=bytes([D0_RD_MODULSPEC_DATA, 0xFF, 0x00]),
                             objsource=self._objadr,
                             mi=self._mi,
                             type8=SEND_AS_IP,

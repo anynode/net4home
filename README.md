@@ -161,7 +161,7 @@ Die Einrichtung von Verzeichnis, Dashboard-Karte und Lesernamen beschreibt die [
 
 ## Version
 
-Aktuelle Version: **1.3.2**
+Aktuelle Version: **1.3.3**
 
 ## Fehlersuche
 

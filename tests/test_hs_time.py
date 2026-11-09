@@ -84,6 +84,22 @@ class HsTimeTest(unittest.TestCase):
         self.assertEqual(hs_time.sun_time_from_ack(bytes([101, 50, 0, 0xFF, 0xC4])), "01:00-")
         self.assertIsNone(hs_time.sun_time_from_ack(bytes([101, 50, 6])))
 
+    def test_short_module_info_uses_the_module_number(self) -> None:
+        # Firmware 4.03/1.22 answers line 0xFF with three bytes and no address.
+        short = hs_time.module_info_from_reply(bytes([38, 0xFF, 0x00]), "MI0264")
+        self.assertEqual(short["objadr"], 26401)
+        self.assertTrue(short["guessed"])
+        self.assertNotIn("broadcast_index", short)
+        long = hs_time.module_info_from_reply(
+            bytes([38, 0xFF, 0x67, 0x21, 1, 0, 0, 0, 0, 16]),
+            "MI0264",
+        )
+        self.assertEqual(long["objadr"], 0x6721)
+        self.assertFalse(long["guessed"])
+        self.assertEqual(long["broadcast_index"], 1)
+        self.assertEqual(long["tab_count"], 16)
+        self.assertIsNone(hs_time.module_info_from_reply(bytes([38, 0xFF]), "MI0264"))
+
     def test_sun_objects_follow_the_profile_table(self) -> None:
         self.assertEqual(hs_time.sun_object_offsets("4.04/2.01"), (49, 50))
         self.assertEqual(hs_time.sun_object_offsets("4.04/201"), (49, 50))
