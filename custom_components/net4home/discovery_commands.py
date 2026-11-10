@@ -204,7 +204,7 @@ class DiscoveryCommands:
         # Add to queue (if queue is running)
         if self._detail_queue is not None:
             await self._detail_queue.put(device_id)
-            _LOGGER.info(f"Device {device_id} ({device.model}) queued for detail retrieval")
+            _LOGGER.debug("Device %s (%s) queued for detail retrieval", device_id, device.model)
         else:
             _LOGGER.warning(f"Detail queue not initialized, cannot queue {device_id}")
 
@@ -235,7 +235,7 @@ class DiscoveryCommands:
                         self._detail_queue.get(), 
                         timeout=1.0
                     )
-                    _LOGGER.info(f"Processing device {device_id} from detail queue")
+                    _LOGGER.debug("Processing device %s from detail queue", device_id)
                 except asyncio.TimeoutError:
                     continue
                 

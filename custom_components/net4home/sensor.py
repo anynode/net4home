@@ -108,7 +108,7 @@ async def async_setup_entry(hass, entry, async_add_entities: Callable):
 
     # Sensor devices (exclude HS-Time, already handled above)
     sensor_devices = [d for d in api.devices.values() if d.device_type == "sensor" and d.model != "HS-Time"]
-    _LOGGER.info(f"[Sensor] Found {len(sensor_devices)} sensor devices: {[d.device_id for d in sensor_devices]}")
+    _LOGGER.info("[Sensor] Found %s sensor devices", len(sensor_devices))
     for device in sensor_devices:
         sensor_info = SENSOR_MODEL_TO_TYPE_UNIT.get((device.model or "").lower())
         if sensor_info is None and (device.model or "").lower() == "sensor" and device.via_device:
@@ -125,12 +125,17 @@ async def async_setup_entry(hass, entry, async_add_entities: Callable):
             continue
         sensor_key, unit = sensor_info
         entities.append(Net4HomeSensor(api, entry, device, sensor_key, unit))
-        _LOGGER.info(f"Append sensor model {device.model} for device {device.device_id} {sensor_info}")
+        _LOGGER.debug(
+            "Append sensor model %s for device %s %s",
+            device.model,
+            device.device_id,
+            sensor_info,
+        )
 
     # RF-Reader devices (only MI devices, not OBJ child devices)
     # IMPORTANT: Devices with via_device are OBJ devices, even if device_id starts with "MI"
     rf_reader_devices = [d for d in api.devices.values() if d.device_type == "rf_reader" and d.device_id.startswith("MI") and not d.via_device]
-    _LOGGER.info(f"[Sensor] Found {len(rf_reader_devices)} RF-Reader devices: {[d.device_id for d in rf_reader_devices]}")
+    _LOGGER.info("[Sensor] Found %s RF-Reader devices", len(rf_reader_devices))
     for device in rf_reader_devices:
         entities.extend(_rf_reader_sensors(api, entry, device))
 

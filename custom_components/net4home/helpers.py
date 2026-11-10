@@ -304,7 +304,7 @@ async def register_device_in_registry(
 
         return
 
-    _LOGGER.info(f"Registered new device: {device_type or 'unknown'} / {device_id}")
+    _LOGGER.debug("Registered new device: %s / %s", device_type or "unknown", device_id)
 
     # Load existing detail_status from config if available
     existing_device = existing_devices.get(device_id, {})

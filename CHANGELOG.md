@@ -5,6 +5,11 @@ All notable changes to the net4home Home Assistant integration will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-11-10
+
+### Changed
+- Entity setup no longer writes one log line per sensor, binary sensor or newly registered device. The counts stay.
+
 ## [1.3.5] - 2026-11-10
 
 ### Fixed

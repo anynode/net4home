@@ -29,7 +29,7 @@ async def async_setup_entry(
     _LOGGER.info(f"[BinarySensor] Starting setup_entry with {len(api.devices)} known devices")
     binary_sensor_devices = [d for d in api.devices.values() if d.device_type == "binary_sensor"]
     alarm_devices = [d for d in api.devices.values() if d.device_type == "alarm_control_panel"]
-    _LOGGER.info(f"[BinarySensor] Found {len(binary_sensor_devices)} binary_sensor devices: {[d.device_id for d in binary_sensor_devices]}")
+    _LOGGER.info("[BinarySensor] Found %s binary_sensor devices", len(binary_sensor_devices))
 
     # ONLY BinarySensor entities (no ConfigSensor entities)
     entities = [
