@@ -140,6 +140,14 @@ class TamperGatingTest(unittest.TestCase):
         self.assertTrue(alarm_layout.sabotage_reported(True, "armed_away"))
         self.assertFalse(alarm_layout.sabotage_reported(False, "armed_away"))
         self.assertFalse(alarm_layout.sabotage_reported(None, "armed_away"))
+        self.assertEqual(
+            alarm_layout.alarm_status_text("disarmed", True),
+            "status disarmed, sabotage bit set, not a tamper alarm while disarmed",
+        )
+        self.assertEqual(
+            alarm_layout.alarm_status_text("armed_away", True),
+            "status armed_away, tamper alarm",
+        )
 
 
 class ModuleInfoTest(unittest.TestCase):

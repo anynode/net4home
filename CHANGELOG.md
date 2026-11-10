@@ -5,6 +5,17 @@ All notable changes to the net4home Home Assistant integration will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-11-10
+
+### Fixed
+- UP-TLH and UP-T measured values are requested with D0_VALUE_REQ at startup, so temperature, light and humidity do not stay empty until the module's own send interval.
+- A startup read is cancelled when Home Assistant stops, so a second start does not talk over the first one.
+- HS-Safety no longer reports a missing base address when the module simply answers late. A missed group or trigger line is requested once more.
+- The sabotage bit that stays set while a panel is disarmed is logged as that bit, not as a tamper alarm.
+
+### Changed
+- Routine bus reads are one summary line. Sensor activation, setpoints, sun times and protocol lines no longer fill the log.
+
 ## [1.3.4] - 2026-11-09
 
 ### Fixed

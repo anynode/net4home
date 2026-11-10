@@ -202,7 +202,7 @@ class HsTimeCommands:
             count,
         )
         for row in rows:
-            _LOGGER.info(
+            _LOGGER.debug(
                 "HS-Time %s #%s %s %s %s adr %s cmd %s profile %s",
                 device.device_id,
                 row["nr"],

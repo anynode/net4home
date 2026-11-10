@@ -31,13 +31,21 @@ from .helpers import register_device_in_registry
 
 _LOGGER = logging.getLogger(__name__)
 
+_MEASURED_SENSOR_NAMES = ("temperature sensor", "humidity sensor", "illuminance sensor")
+
+
+def _is_measured_sensor(device) -> bool:
+    """True for a UP-TLH temperature, illuminance or humidity object."""
+    name = (getattr(device, "name", None) or "").lower()
+    return any(name.startswith(prefix) for prefix in _MEASURED_SENSOR_NAMES)
+
 class ClimateCommands:
     """UP-T and UP-TLH commands."""
 
     async def _async_register_tlh_measured_sensor(self, parent, sensor_obj: int, sensor_type: str) -> None:
         """Register one UP-TLH or UP-T measured-value sensor under its parent module."""
         sensor_id = f"OBJ{sensor_obj:05d}"
-        _LOGGER.info(
+        _LOGGER.debug(
             "UP-TLH/UP-T %s channel %s -> %s",
             parent.device_id,
             sensor_type,
@@ -315,7 +323,11 @@ class ClimateCommands:
                 await asyncio.sleep(0.1)
 
     async def async_activate_all_sensors(self):
-        """Send D0_REQ to registered sensor objects so they broadcast their current value."""
+        """Ask every sensor object for its current value.
+
+        Temperature, light and humidity answer D0_VALUE_REQ. Other sensors
+        answer D0_REQ.
+        """
         if self._packet_sender is None:
             _LOGGER.warning("Cannot activate sensors: not connected")
             return
@@ -330,17 +342,22 @@ class ClimateCommands:
                 continue
             if obj_addr <= 0:
                 continue
-            _LOGGER.info(f"Activating sensor {device_id} (OBJ=0x{obj_addr:04X})")
+            measured = _is_measured_sensor(device)
+            _LOGGER.debug(
+                "Reading %s at object %s",
+                device_id,
+                obj_addr,
+            )
             await self._packet_sender.send_raw_command(
                 ipdst=obj_addr,
-                ddata=bytes([D0_REQ, 0x00, 0x00]),
+                ddata=bytes([D0_VALUE_REQ if measured else D0_REQ, 0x00, 0x00]),
                 objsource=self._objadr,
                 mi=self._mi,
                 type8=SEND_AS_OBJ_GRP,
             )
             sensor_count += 1
-            await asyncio.sleep(0.2)
-        _LOGGER.info(f"Sent activation requests to {sensor_count} sensors")
+            await asyncio.sleep(0.1)
+        _LOGGER.info("Requested current values from %s sensors", sensor_count)
 
     async def async_refresh_climate_setpoints(self) -> None:
         """Read the current setpoint and the heat/cool controller flags.
@@ -363,7 +380,7 @@ class ClimateCommands:
                 _LOGGER.info("UP-TLH %s has no setpoint address, setpoint not read", device_id)
                 continue
             try:
-                _LOGGER.info("Reading setpoint of %s at object %s", device_id, objadr)
+                _LOGGER.debug("Reading setpoint of %s at object %s", device_id, objadr)
                 await self._packet_sender.send_raw_command(
                     ipdst=objadr,
                     ddata=bytes([D0_REQ, 0x00, 0x00]),
@@ -393,7 +410,7 @@ class ClimateCommands:
                 continue
             try:
                 mi_addr = int(device_id[2:], 16)
-                _LOGGER.info(f"Refreshing preset values (0xF0) for {device_id}")
+                _LOGGER.debug("Refreshing preset values (0xF0) for %s", device_id)
                 await self._packet_sender.send_raw_command(
                     ipdst=mi_addr,
                     ddata=bytes([D0_ENABLE_CONFIGURATION, D1_ENABLE_CONFIGURATION_OK_BYTE, 0x00]),

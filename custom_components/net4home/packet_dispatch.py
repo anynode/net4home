@@ -54,6 +54,7 @@ from .alarm_layout import (
     alarm_flags_from_sensor_ack,
     alarm_sabotage,
     alarm_state_from_status,
+    alarm_status_text,
     alarm_tables_from_info,
     ensure_alarm_runtime,
     trigger_from_entry,
@@ -493,7 +494,7 @@ class PacketDispatch:
                                                     heat_active, cool_active, hvac_mode = climate_regulators(paket.ddata[3])
                                                     device.heat_active = heat_active
                                                     device.cool_active = cool_active
-                                                    _LOGGER.info(
+                                                    _LOGGER.debug(
                                                         "UP-TLH %s setpoint %s °C, heat=%s, cool=%s",
                                                         device.device_id,
                                                         temp,
@@ -1089,10 +1090,9 @@ class PacketDispatch:
                                         alarm.alarm_sabotage = sabotage
                                         if previous != state or previous_sabotage != sabotage:
                                             _LOGGER.info(
-                                                "HS-Safety %s status %s sabotage %s (flags=0x%02X syncing=%s)",
+                                                "HS-Safety %s %s (flags=0x%02X syncing=%s)",
                                                 alarm.device_id,
-                                                state,
-                                                sabotage,
+                                                alarm_status_text(state, sabotage),
                                                 flags,
                                                 syncing,
                                             )
@@ -1745,13 +1745,25 @@ class PacketDispatch:
                                                         f"net4home_update_{target}_{sun_kind}",
                                                         value,
                                                     )
-                                                    _LOGGER.info(
-                                                        "HS-Time %s %s %s raw %s",
-                                                        target,
-                                                        sun_kind,
-                                                        value,
-                                                        paket.ddata.hex(),
-                                                    )
+                                                    logged = getattr(mi_device, "hs_sun_logged", None)
+                                                    if not isinstance(logged, set):
+                                                        logged = set()
+                                                        mi_device.hs_sun_logged = logged
+                                                    if sun_kind not in logged:
+                                                        logged.add(sun_kind)
+                                                        _LOGGER.info(
+                                                            "HS-Time %s %s %s",
+                                                            target,
+                                                            sun_kind,
+                                                            value,
+                                                        )
+                                                    else:
+                                                        _LOGGER.debug(
+                                                            "HS-Time %s %s %s",
+                                                            target,
+                                                            sun_kind,
+                                                            value,
+                                                        )
                                             else:
                                                 _LOGGER.warning(
                                                     "HS-Time %s reply from MI%04X did not match",

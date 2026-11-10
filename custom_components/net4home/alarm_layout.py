@@ -143,6 +143,15 @@ def is_armed(state: Optional[str]) -> bool:
     return state in _LEVEL_TRIGGER_MASK
 
 
+def alarm_status_text(state: Optional[str], raw_sabotage: Optional[bool]) -> str:
+    """One status line. The sabotage bit stays set while the panel is disarmed."""
+    if sabotage_reported(raw_sabotage, state):
+        return f"status {state}, tamper alarm"
+    if raw_sabotage:
+        return f"status {state}, sabotage bit set, not a tamper alarm while disarmed"
+    return f"status {state}, sabotage bit clear"
+
+
 def sabotage_reported(raw_sabotage: Optional[bool], state: Optional[str]) -> bool:
     """Tamper is only reported while the panel is armed.
 

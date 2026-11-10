@@ -314,6 +314,42 @@ class Net4HomeApi(
         if waiter and waiter["index"] == index and not waiter["event"].is_set():
             waiter["event"].set()
 
+    async def _async_read_one_table_line(
+        self,
+        mi_addr: int,
+        request_cmd: int,
+        ack_cmd: int,
+        channel: int,
+        label: str,
+    ) -> bool:
+        """Read one configuration line. A lost first request is repeated once."""
+        for attempt in (1, 2):
+            event = self._expect_line_read(mi_addr, ack_cmd, channel)
+            try:
+                await self._packet_sender.send_raw_command(
+                    ipdst=mi_addr,
+                    ddata=bytes([request_cmd, channel, 0x00]),
+                    objsource=self._objadr,
+                    mi=self._mi,
+                    type8=SEND_AS_IP,
+                )
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=2.0)
+                    return True
+                except TimeoutError:
+                    _LOGGER.debug(
+                        "%s line %s from MI%04X no answer within 2s (attempt %s)",
+                        label,
+                        channel,
+                        mi_addr,
+                        attempt,
+                    )
+            finally:
+                current = self._line_reads.get((mi_addr, ack_cmd))
+                if current and current["event"] is event:
+                    self._line_reads.pop((mi_addr, ack_cmd), None)
+        return False
+
     async def _async_read_table_lines(
         self,
         mi_addr: int,
@@ -322,36 +358,35 @@ class Net4HomeApi(
         count: int,
         label: str,
         start: int = 0,
-    ) -> None:
-        """Read configuration lines one by one, the way the configurator does."""
+    ) -> list:
+        """Read configuration lines one by one, the way the configurator does.
+
+        Lines that stay silent are asked once more after the rest of the
+        table. A busy bus often answers that second pass.
+        """
+        missed = []
         for channel in range(start, start + count):
-            # The first request right after configuration mode is sometimes lost
-            # (MI0113 line 0 on 2026-11-05). One repeat is enough in practice.
-            for attempt in (1, 2):
-                event = self._expect_line_read(mi_addr, ack_cmd, channel)
-                try:
-                    await self._packet_sender.send_raw_command(
-                        ipdst=mi_addr,
-                        ddata=bytes([request_cmd, channel, 0x00]),
-                        objsource=self._objadr,
-                        mi=self._mi,
-                        type8=SEND_AS_IP,
-                    )
-                    try:
-                        await asyncio.wait_for(event.wait(), timeout=2.0)
-                        break
-                    except TimeoutError:
-                        _LOGGER.info(
-                            "%s line %s from MI%04X no answer within 2s (attempt %s)",
-                            label,
-                            channel,
-                            mi_addr,
-                            attempt,
-                        )
-                finally:
-                    current = self._line_reads.get((mi_addr, ack_cmd))
-                    if current and current["event"] is event:
-                        self._line_reads.pop((mi_addr, ack_cmd), None)
+            if not await self._async_read_one_table_line(
+                mi_addr, request_cmd, ack_cmd, channel, label
+            ):
+                missed.append(channel)
+        if missed:
+            await asyncio.sleep(1.0)
+            still = []
+            for channel in missed:
+                if not await self._async_read_one_table_line(
+                    mi_addr, request_cmd, ack_cmd, channel, label
+                ):
+                    still.append(channel)
+            missed = still
+        if missed:
+            _LOGGER.warning(
+                "%s from MI%04X missed lines %s",
+                label,
+                mi_addr,
+                ", ".join(str(channel) for channel in missed),
+            )
+        return missed
 
     async def async_request_sensor_data(self, device_id: str, channel: int = 0):
         """Request sensor data for a device (MI address)."""

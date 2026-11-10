@@ -262,7 +262,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: config_entries.ConfigEnt
         except Exception:
             _LOGGER.exception("Startup reads failed")
 
-    entry.async_create_background_task(
+    api._startup_task = entry.async_create_background_task(
         hass, _finish_startup(), f"net4home startup {entry.entry_id}"
     )
     return True
@@ -272,6 +272,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: config_entries.ConfigEn
     """Unload a config entry."""
     api = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if api:
+        startup = getattr(api, "_startup_task", None)
+        if startup is not None and not startup.done():
+            startup.cancel()
         await api.async_stop_detail_retrieval()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

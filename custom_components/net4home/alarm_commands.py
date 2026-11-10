@@ -70,15 +70,30 @@ class AlarmCommands:
                 if device.objadr and device.objadr > 0:
                     return
                 await asyncio.sleep(0.05)
-            _LOGGER.info(
+            _LOGGER.debug(
                 "HS-Safety %s base address no answer (attempt %s)",
                 device.device_id,
                 attempt,
             )
+        for _ in range(20):
+            if device.objadr and device.objadr > 0:
+                _LOGGER.info(
+                    "HS-Safety %s base address %s arrived late",
+                    device.device_id,
+                    device.objadr,
+                )
+                return
+            await asyncio.sleep(0.5)
         if previous:
             device.objadr = previous
+            _LOGGER.warning(
+                "HS-Safety %s did not answer the base address, keeping %s",
+                device.device_id,
+                previous,
+            )
+            return
         _LOGGER.warning(
-            "HS-Safety %s base address was not in modulspec line 0",
+            "HS-Safety %s did not answer the base address",
             device.device_id,
         )
 
@@ -205,10 +220,14 @@ class AlarmCommands:
                     for trigger in sorted(device.alarm_triggers.values(), key=lambda t: t["index"])
                 )
                 _LOGGER.info(
-                    "HS-Safety %s triggers (%s of %s lines): %s",
+                    "HS-Safety %s triggers: %s of %s lines",
                     device.device_id,
                     len(device.alarm_triggers),
                     counts.tab1,
+                )
+                _LOGGER.debug(
+                    "HS-Safety %s trigger lines: %s",
+                    device.device_id,
                     names or "keine",
                 )
                 async_dispatcher_send(
@@ -292,7 +311,7 @@ class AlarmCommands:
             len(device.alarm_log),
         )
         if device.alarm_log:
-            _LOGGER.info(
+            _LOGGER.debug(
                 "HS-Safety %s newest protocol line: %s",
                 device.device_id,
                 device.alarm_log[0]["line"],

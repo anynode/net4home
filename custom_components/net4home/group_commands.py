@@ -70,41 +70,50 @@ class GroupCommands:
         """
         missed = []
         for channel in range(count):
-            answered = False
-            for attempt in (1, 2):
-                event = self._expect_line_read(mi_addr, D0_RD_GRP_DATA_ACK, channel)
-                try:
-                    await self._packet_sender.send_raw_command(
-                        ipdst=mi_addr,
-                        ddata=bytes([D0_RD_GRP_DATA, channel, 0x00]),
-                        objsource=self._objadr,
-                        mi=self._mi,
-                        type8=SEND_AS_IP,
-                    )
-                    try:
-                        await asyncio.wait_for(event.wait(), timeout=2.0)
-                        answered = True
-                        break
-                    except TimeoutError:
-                        _LOGGER.info(
-                            "Gruppe line %s from MI%04X no answer within 2s (attempt %s)",
-                            channel,
-                            mi_addr,
-                            attempt,
-                        )
-                finally:
-                    current = self._line_reads.get((mi_addr, D0_RD_GRP_DATA_ACK))
-                    if current and current["event"] is event:
-                        self._line_reads.pop((mi_addr, D0_RD_GRP_DATA_ACK), None)
-            if not answered:
+            if not await self._async_read_one_group_line(mi_addr, channel):
                 missed.append(channel)
         if missed:
+            await asyncio.sleep(1.0)
+            still = []
+            for channel in missed:
+                if not await self._async_read_one_group_line(mi_addr, channel):
+                    still.append(channel)
+            missed = still
+        if missed:
             _LOGGER.warning(
-                "MI%04X group table missed %s of %s lines",
+                "MI%04X group table missed lines %s of %s",
                 mi_addr,
-                len(missed),
+                ", ".join(str(channel) for channel in missed),
                 count,
             )
+
+    async def _async_read_one_group_line(self, mi_addr: int, channel: int) -> bool:
+        """Read one group-table line. A lost first request is repeated once."""
+        for attempt in (1, 2):
+            event = self._expect_line_read(mi_addr, D0_RD_GRP_DATA_ACK, channel)
+            try:
+                await self._packet_sender.send_raw_command(
+                    ipdst=mi_addr,
+                    ddata=bytes([D0_RD_GRP_DATA, channel, 0x00]),
+                    objsource=self._objadr,
+                    mi=self._mi,
+                    type8=SEND_AS_IP,
+                )
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=2.0)
+                    return True
+                except TimeoutError:
+                    _LOGGER.debug(
+                        "Gruppe line %s from MI%04X no answer within 2s (attempt %s)",
+                        channel,
+                        mi_addr,
+                        attempt,
+                    )
+            finally:
+                current = self._line_reads.get((mi_addr, D0_RD_GRP_DATA_ACK))
+                if current and current["event"] is event:
+                    self._line_reads.pop((mi_addr, D0_RD_GRP_DATA_ACK), None)
+        return False
 
     def _drop_stored_group_names(self) -> None:
         """Remove a name list that was written into the config entry by mistake."""
